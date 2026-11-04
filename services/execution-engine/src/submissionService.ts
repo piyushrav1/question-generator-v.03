@@ -16,6 +16,7 @@ export class SubmissionService {
     if (!question) {
       throw new HttpError(404, 'Question not found.', 'QUESTION_NOT_FOUND')
     }
+    const timerMetadata = await this.getSubmissionTimerMetadata(ownerId, input.questionId, input.submitted)
 
     const mismatch = this.detectLanguageMismatch(input.language, input.code)
     if (mismatch) {
@@ -33,6 +34,7 @@ export class SubmissionService {
         runtimeMs: 0,
         memoryMb: null,
         message: mismatch,
+        ...timerMetadata,
         caseResults: [{
           id: 'language-mismatch',
           name: 'Language check',
@@ -54,11 +56,18 @@ export class SubmissionService {
         input: input.customInput,
         timeoutMs: this.timeoutMs,
       })
+      const hasExpectedOutput = typeof input.customExpectedOutput === 'string' && input.customExpectedOutput.trim().length > 0
+      const comparisonMode = question.comparisonMode ?? 'token'
       const status = result.timedOut
         ? 'time_limit_exceeded'
         : result.runtimeError
           ? 'runtime_error'
-          : 'accepted'
+          : hasExpectedOutput
+            ? this.compareOutput(result.stdout, input.customExpectedOutput ?? '', comparisonMode) ? 'accepted' : 'wrong_answer'
+            : 'accepted'
+      const mismatch = hasExpectedOutput
+        ? this.findMismatch(result.stdout, input.customExpectedOutput ?? '', comparisonMode)
+        : undefined
       const customResult: SubmissionResultDto = {
         id: `sub-${Date.now().toString(36)}`,
         questionId: input.questionId,
@@ -77,13 +86,17 @@ export class SubmissionService {
           : status === 'runtime_error'
             ? result.stderr || 'Custom test could not be executed.'
             : 'Custom test completed.',
+        ...timerMetadata,
         caseResults: [{
           id: 'custom',
           name: 'Custom Test',
           hidden: false,
           status: status === 'accepted' ? 'passed' : status,
           actualOutput: result.stdout.trim(),
+          expectedOutput: hasExpectedOutput ? input.customExpectedOutput?.trim() : undefined,
           runtimeMs: result.runtimeMs,
+          mismatchLine: mismatch?.line,
+          mismatchColumn: mismatch?.column,
         }],
       }
       await this.repository.saveSubmission(ownerId, customResult)
@@ -92,12 +105,11 @@ export class SubmissionService {
 
     const visibleCases = question.testCases.filter((testCase) => !testCase.hidden)
     const hiddenCases = input.submitted ? question.testCases.filter((testCase) => testCase.hidden) : []
-    const visiblePassed = await this.countPassed(visibleCases, input)
-    const hiddenPassed = await this.countPassed(hiddenCases, input)
+    const comparisonMode = question.comparisonMode ?? 'token'
+    const visiblePassed = await this.countPassed(visibleCases, input, comparisonMode)
+    const hiddenPassed = await this.countPassed(hiddenCases, input, comparisonMode)
     const runtimeError = visiblePassed.error || hiddenPassed.error
     const timedOut = visiblePassed.timedOut || hiddenPassed.timedOut
-    const totalVisible = visiblePassed.count
-    const totalHidden = hiddenPassed.count
     const passedAll = visiblePassed.count === visibleCases.length && hiddenPassed.count === hiddenCases.length
     const status = timedOut
       ? 'time_limit_exceeded'
@@ -129,47 +141,206 @@ export class SubmissionService {
           : status === 'runtime_error'
             ? (visiblePassed.stderr || hiddenPassed.stderr || 'Your submission could not be executed. Check the language and syntax.')
             : 'One or more test cases failed.',
+      ...timerMetadata,
     }
 
     await this.repository.saveSubmission(ownerId, result)
     return result
   }
 
+  private async getSubmissionTimerMetadata(
+    ownerId: string,
+    questionId: string,
+    submitted: boolean,
+  ): Promise<Pick<SubmissionResultDto, 'submittedAfterDeadline' | 'remainingSecondsAtSubmission'>> {
+    if (!submitted) return {}
+    const attempt = await this.repository.findActiveAttempt(ownerId)
+    if (!attempt || attempt.questionId !== questionId) return { submittedAfterDeadline: false, remainingSecondsAtSubmission: 0 }
+
+    const timer = this.repository.normalizeTimer(attempt)
+    if (timer.status === 'running' && timer.expiresAt) {
+      const remainingSeconds = Math.max(0, Math.ceil((Date.parse(timer.expiresAt) - Date.now()) / 1000))
+      return {
+        submittedAfterDeadline: remainingSeconds === 0,
+        remainingSecondsAtSubmission: remainingSeconds,
+      }
+    }
+    return {
+      submittedAfterDeadline: timer.status === 'expired',
+      remainingSecondsAtSubmission: timer.remainingSeconds,
+    }
+  }
+
+  // ── Language-mismatch heuristic ───────────────────────────────────────────
   private detectLanguageMismatch(language: ProgrammingLanguage, code: string): string | null {
-    const looksCpp = /#include\s*<|using\s+namespace\s+std;|std::|vector\s*</.test(code)
-    const looksPython = /^\s*(from\s+\S+\s+import|def\s+\w+\s*\(|class\s+Solution\s*:)/m.test(code)
-    const looksJava = /\bpublic\s+(class|static|int)\b|import\s+java\./.test(code)
-    const looksJavaScript = /\b(function\s+\w+\s*\(|const\s+\w+\s*=|let\s+\w+\s*=|console\.log)/.test(code)
+    const looksCpp = /#include\s*<|using\s+namespace\s+std;|std::|<bits\/stdc\+\+\.h>/.test(code)
+    const looksPython = /^\s*(from\s+\S+\s+import|def\s+\w+\s*\(|class\s+Solution\s*:|import\s+sys\b)/m.test(code)
+    const looksJava = /\bpublic\s+(class|static)\b.*|import\s+java\./.test(code)
+    // JS detection: only flag if there's clear node/browser-specific API, not generic code
+    const looksJavaScript = /\b(process\.stdin|readFileSync|console\.log\(|require\s*\()\b/.test(code)
 
     if (looksCpp && language !== 'C++') {
-      return `Language mismatch: this code uses C++ syntax, but ${language} is selected. Switch the language dropdown to C++.`
+      return `Language mismatch: C++ syntax detected but ${language} is selected. Switch language to C++.`
     }
     if (looksPython && language !== 'Python') {
-      return `Language mismatch: this code uses Python syntax, but ${language} is selected. Switch the language dropdown to Python.`
+      return `Language mismatch: Python syntax detected but ${language} is selected. Switch language to Python.`
     }
-    if (looksJava && language !== 'Java') {
-      return `Language mismatch: this code uses Java syntax, but ${language} is selected. Switch the language dropdown to Java.`
+    if (looksJava && !looksCpp && !looksJavaScript && language !== 'Java') {
+      return `Language mismatch: Java syntax detected but ${language} is selected. Switch language to Java.`
     }
-    if (looksJavaScript && language !== 'JavaScript') {
-      return `Language mismatch: this code uses JavaScript syntax, but ${language} is selected. Switch the language dropdown to JavaScript.`
+    if (looksJavaScript && !looksCpp && !looksPython && !looksJava && language !== 'JavaScript') {
+      return `Language mismatch: JavaScript syntax detected but ${language} is selected. Switch language to JavaScript.`
     }
     return null
   }
 
+  // ── Prepare code — only wrap LeetCode-style class Solution submissions ────
+  //
+  //   Our generated starter code always includes a proper main/entry point,
+  //   so we pass it straight through. We ONLY apply the wrapper heuristics
+  //   when the user submits a bare "class Solution" snippet (LeetCode style).
+  //
   private prepareCode(language: ProgrammingLanguage, code: string): string {
     if (language === 'JavaScript') {
+      // Pass through if the code already handles its own stdin reading
+      if (/\b(readFileSync|process\.stdin|stdin)\b/.test(code)) return code
+      // Wrap only bare class/function snippets
       return this.prepareJavaScriptCode(code)
     }
+
     if (language === 'C++') {
+      // Pass through if main() is present
+      if (/\bint\s+main\s*\(/.test(code)) return code
       return this.prepareCppCode(code)
     }
+
     if (language === 'Java') {
+      // Pass through if main or Main class is present
+      if (/\bpublic\s+(?:static\s+)?void\s+main\s*\(/.test(code) || /\bpublic\s+class\s+Main\b/.test(code)) return code
       return this.prepareJavaCode(code)
     }
+
+    // Python: only wrap bare "class Solution" LeetCode style
     if (language !== 'Python' || !/\bclass\s+Solution\b/.test(code)) {
       return code
     }
+    return this.preparePythonSolutionCode(code)
+  }
 
+  // ── normalizeTestInput ────────────────────────────────────────────────────
+  //
+  //   Test case inputs are ALWAYS raw plain stdin (line-by-line or tokens).
+  //   We do NOT convert them to key=value or JSON — that format was for
+  //   LeetCode-style class Solution wrappers only.
+  //
+  //   This method now only sanitizes line endings and BOM characters.
+  //   It passes all other content through unchanged so the runner gets
+  //   exactly what the problem's input format specifies.
+  //
+  private normalizeTestInput(input: string): string {
+    return input
+      .replace(/\uFEFF/g, '')      // strip BOM if present
+      .replace(/\r\n/g, '\n')      // normalize CRLF → LF
+      .replace(/\r/g, '\n')        // normalize lone CR → LF
+  }
+
+  // ── Output comparison ─────────────────────────────────────────────────────
+  private compareOutput(actual: string, expected: string, mode: 'exact' | 'token' | 'json'): boolean {
+    const actualText = actual.replace(/\r\n/g, '\n').trimEnd()
+    const expectedText = expected.replace(/\r\n/g, '\n').trimEnd()
+
+    if (mode === 'token') {
+      // Split on any whitespace, compare token sequences
+      const normalizeTokens = (s: string) => s.trim().split(/\s+/).filter(Boolean).join(' ')
+      return normalizeTokens(actualText) === normalizeTokens(expectedText)
+    }
+    if (mode === 'json') {
+      try {
+        return JSON.stringify(JSON.parse(actualText)) === JSON.stringify(JSON.parse(expectedText))
+      } catch {
+        return false
+      }
+    }
+    // exact mode: trim trailing whitespace only, preserve internal structure
+    return actualText === expectedText
+  }
+
+  private findMismatch(actual: string, expected: string, mode: 'exact' | 'token' | 'json'): { line: number; column: number } | undefined {
+    if (this.compareOutput(actual, expected, mode)) return undefined
+    if (mode === 'json') return { line: 1, column: 1 }
+
+    const actualText = actual.replace(/\r\n/g, '\n').trim()
+    const expectedText = expected.replace(/\r\n/g, '\n').trim()
+    const sourceText = mode === 'token' ? actualText.split(/\s+/).filter(Boolean).join(' ') : actualText
+    const targetText = mode === 'token' ? expectedText.split(/\s+/).filter(Boolean).join(' ') : expectedText
+
+    let index = 0
+    while (index < sourceText.length && index < targetText.length && sourceText[index] === targetText[index]) index++
+    const prefix = sourceText.slice(0, index)
+    const line = prefix.split('\n').length
+    const lastBreak = prefix.lastIndexOf('\n')
+    return { line, column: index - lastBreak }
+  }
+
+  // ── Run test cases against submitted code ─────────────────────────────────
+  private async countPassed(
+    testCases: Array<{ id: string; name: string; input: string; expectedOutput?: string; hidden: boolean }>,
+    input: SubmissionRequest,
+    comparisonMode: 'exact' | 'token' | 'json' = 'token',
+  ): Promise<{ count: number; error: boolean; timedOut: boolean; runtimeMs: number[]; stderr: string; caseResults: SubmissionCaseResultDto[] }> {
+    let count = 0
+    let error = false
+    let timedOut = false
+    let stderr = ''
+    const runtimeMs: number[] = []
+    const caseResults: SubmissionCaseResultDto[] = []
+
+    const preparedCode = this.prepareCode(input.language, input.code)
+
+    for (const testCase of testCases) {
+      const result = await this.runner.execute({
+        language: input.language,
+        code: preparedCode,
+        input: this.normalizeTestInput(testCase.input),
+        timeoutMs: this.timeoutMs,
+      })
+      runtimeMs.push(result.runtimeMs)
+      if (result.stderr) stderr = result.stderr
+      if (result.timedOut) timedOut = true
+      if (result.runtimeError) error = true
+
+      const passed = !result.timedOut && !result.runtimeError
+        && this.compareOutput(result.stdout, testCase.expectedOutput ?? '', comparisonMode)
+      const mismatch = passed ? undefined : this.findMismatch(result.stdout, testCase.expectedOutput ?? '', comparisonMode)
+      if (passed) count++
+
+      caseResults.push({
+        id: testCase.id,
+        name: testCase.hidden ? 'Hidden Test Case' : testCase.name,
+        hidden: testCase.hidden,
+        status: result.timedOut
+          ? 'time_limit_exceeded'
+          : result.runtimeError
+            ? 'runtime_error'
+            : passed
+              ? 'passed'
+              : 'wrong_answer',
+        actualOutput: testCase.hidden ? undefined : result.stdout.trim(),
+        expectedOutput: testCase.hidden ? undefined : testCase.expectedOutput,
+        runtimeMs: result.runtimeMs,
+        mismatchLine: testCase.hidden ? undefined : mismatch?.line,
+        mismatchColumn: testCase.hidden ? undefined : mismatch?.column,
+      })
+    }
+
+    return { count, error, timedOut, runtimeMs, stderr, caseResults }
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // LeetCode-style "class Solution" wrapper code (only used when needed)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  private preparePythonSolutionCode(code: string): string {
     const futureImport = code.match(/^from\s+__future__\s+import\s+[^\n]+(?:\n|$)/)?.[0] ?? ''
     const sourceWithoutFuture = futureImport ? code.slice(futureImport.length) : code
 
@@ -195,7 +366,7 @@ if __name__ == "__main__":
         pass
 
     for name, value_text in re.findall(
-        r"([A-Za-z_]\\w*)\\s*=\\s*(\\[[^\\]]*\\]|-?\\d+(?:\\.\\d+)?)",
+        r"([A-Za-z_]\w*)\s*=\s*(\[[^\]]*\]|-?\d+(?:\.\d+)?)",
         raw,
         re.S,
     ):
@@ -278,34 +449,22 @@ if (typeof require !== "undefined" && require.main === module) {
     if (raw.startsWith("[") && !raw.includes("=")) {
       try { values.args = [JSON.parse(raw)]; } catch (_) {}
     }
-    for (const match of raw.matchAll(/([A-Za-z_]\\w*)\\s*=\\s*(\\[[^\\]]*\\]|-?\\d+(?:\\.\\d+)?)/g)) {
+    for (const match of raw.matchAll(/([A-Za-z_]\w*)\s*=\s*(\[[^\]]*\]|-?\d+(?:\.\d+)?)/g)) {
       try { values[match[1]] = JSON.parse(match[2]); } catch (_) { values[match[1]] = match[2]; }
     }
-    const numsMatch = raw.match(/(?:^|[,\\s])nums\\s*=\\s*(\\[[^\\]]*\\])/);
-    if (numsMatch) {
-      try { values.nums = JSON.parse(numsMatch[1]); } catch (_) {}
-    }
-    const kMatch = raw.match(/(?:^|[,\\s])k\\s*=\\s*(-?\\d+)/);
-    if (kMatch) values.k = Number(kMatch[1]);
     const names = ${JSON.stringify(parameterNames)};
     const args = names.map((name, index) => {
       if (values[name] !== undefined) return values[name];
       const arrayMatch = raw.match(new RegExp(name + "\\\\s*=\\\\s*(\\\\[[^\\\\]]*\\\\])"));
-      if (arrayMatch) {
-        try { return JSON.parse(arrayMatch[1]); } catch (_) {}
-      }
+      if (arrayMatch) { try { return JSON.parse(arrayMatch[1]); } catch (_) {} }
       const valueMatch = raw.match(new RegExp(name + "\\\\s*=\\\\s*(-?\\\\d+(?:\\\\.\\\\d+)?)"));
       if (valueMatch) return Number(valueMatch[1]);
-      const stringMatch = raw.match(new RegExp(name + '\\\\s*=\\\\s*([^,\\\\n}]+)'));
-      if (stringMatch && !/^[0-9.\\[\\]-]/.test(stringMatch[1].trim())) {
-        return stringMatch[1].trim().replace(/^["']|["']$/g, "");
-      }
       return values.args?.[index];
     });
     let result;
     if (typeof Solution === "function") {
       const instance = new Solution();
-    result = instance.${methodName || 'unknown'}(...args);
+      result = instance.${methodName || 'solve'}(...args);
     } else if (typeof ${methodName ? methodName : 'undefined'} === "function") {
       result = ${methodName ? methodName : 'undefined'}(...args);
     }
@@ -317,7 +476,6 @@ if (typeof require !== "undefined" && require.main === module) {
 
   private prepareCppCode(code: string): string {
     const hasSolution = /\bclass\s+Solution\b/.test(code)
-    const method = code.match(/(?:public:\s*)?([\w:<>,\[\] \t*&]+)\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:const\s*)?\{/)
     if (!hasSolution) {
       const standaloneMatch = code.match(/(?:^|\n)\s*(?:int64_t|long\s+long|int|long|bool|double|float|string|vector<[^>]+>|char)\s+(?!main\b)([A-Za-z_]\w*)\s*\(([^)]*)\)\s*\{/m)
       if (!standaloneMatch) return code
@@ -366,7 +524,7 @@ string parseString(const string& name, const string& raw) {
   pos += name.size() + 1;
   while (pos < raw.size() && isspace(raw[pos])) pos++;
   if (raw[pos] == '"') pos++;
-  size_t end = raw.find_first_of(",}\\n", pos);
+  size_t end = raw.find_first_of(",}\n", pos);
   string value = raw.substr(pos, end - pos);
   if (!value.empty() && value.back() == '"') value.pop_back();
   return value;
@@ -398,6 +556,7 @@ int main() {
 }`
     }
 
+    const method = code.match(/(?:public:\s*)?([\\w:<>,\[\] \t*&]+)\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*(?:const\s*)?\{/)
     if (!method) return code
     const methodName = method[2]
     const returnTypeMatch = code.match(new RegExp(`([A-Za-z_][\\w:<>,\\[\\] ]*?)\\s+${methodName}\\s*\\(`))
@@ -437,7 +596,7 @@ string parseString(const string& name, const string& raw) {
   size_t pos = raw.find(pattern);
   if (pos == string::npos) return "";
   pos += pattern.size();
-  size_t end = raw.find_first_of(",\\n}", pos);
+  size_t end = raw.find_first_of(",\n}", pos);
   if (raw[pos] == '"') return raw.substr(pos + 1, end - pos - 2);
   return raw.substr(pos, end - pos);
 }
@@ -458,7 +617,7 @@ void parseIntVector(const string& name, const string& raw, vector<int>& output) 
 
 int main() {
   string raw((istreambuf_iterator<char>(cin)), istreambuf_iterator<char>());
-  if (!raw.empty() && raw.back() == '\\n') raw.pop_back();
+  if (!raw.empty() && raw.back() == '\n') raw.pop_back();
   string numsText = raw;
   ${parseDeclarations.join('\n  ')}
   Solution solution;
@@ -545,51 +704,5 @@ class Main {
     }
   }
 }`
-  }
-
-  private async countPassed(
-    testCases: Array<{ id: string; name: string; input: string; expectedOutput?: string; hidden: boolean }>,
-    input: SubmissionRequest,
-  ): Promise<{ count: number; error: boolean; timedOut: boolean; runtimeMs: number[]; stderr: string; caseResults: SubmissionCaseResultDto[] }> {
-    let count = 0
-    let error = false
-    let timedOut = false
-    let stderr = ''
-    const runtimeMs: number[] = []
-    const caseResults: SubmissionCaseResultDto[] = []
-
-    for (const testCase of testCases) {
-      const result = await this.runner.execute({
-        language: input.language,
-        code: this.prepareCode(input.language, input.code),
-        input: testCase.input,
-        timeoutMs: this.timeoutMs,
-      })
-      runtimeMs.push(result.runtimeMs)
-      if (result.stderr) stderr = result.stderr
-      if (result.timedOut) timedOut = true
-      if (result.runtimeError) error = true
-      const passed = !result.timedOut && !result.runtimeError && result.stdout.trim() === testCase.expectedOutput?.trim()
-      if (passed) {
-        count += 1
-      }
-      caseResults.push({
-        id: testCase.id,
-        name: testCase.hidden ? 'Hidden Test Case' : testCase.name,
-        hidden: testCase.hidden,
-        status: result.timedOut
-          ? 'time_limit_exceeded'
-          : result.runtimeError
-            ? 'runtime_error'
-            : passed
-              ? 'passed'
-              : 'wrong_answer',
-        actualOutput: testCase.hidden ? undefined : result.stdout.trim(),
-        expectedOutput: testCase.hidden ? undefined : testCase.expectedOutput,
-        runtimeMs: result.runtimeMs,
-      })
-    }
-
-    return { count, error, timedOut, runtimeMs, stderr, caseResults }
   }
 }

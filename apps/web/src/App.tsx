@@ -3,36 +3,73 @@ import {
   Bell, ChevronDown, ChevronUp, Code2, Copy, Play, RefreshCw,
   Sparkles, Send, Settings, Terminal, CheckCircle2, Sun, Moon, Monitor, RotateCcw, Maximize2,
   ArrowRight, Layers3, Clock3, Trophy, Shuffle,
+  Pause, LogOut, X,
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { apiClient } from './services'
-import type { AttemptDto, ProgrammingLanguage, QuestionDto, SubmissionResultDto } from '../../../packages/shared/src/types'
+import type { AttemptDto, PracticeTimerDto, ProgrammingLanguage, QuestionDto, SubmissionResultDto } from '../../../packages/shared/src/types'
 
-const starterCode: Record<string, string> = {
-  Python: `def smallest_missing_positive(nums):
-    # Write your solution here
-    pass`,
-  JavaScript: `function smallestMissingPositive(nums) {
+const defaultStarterCode: Record<string, string> = {
+  Python: `import sys
+input = sys.stdin.readline
+
+def solve():
+    # Read input and implement your solution
+    pass
+
+if __name__ == '__main__':
+    solve()`,
+  JavaScript: `process.stdin.resume();
+process.stdin.setEncoding('utf8');
+let _input = '';
+process.stdin.on('data', d => _input += d);
+process.stdin.on('end', () => {
+  const lines = _input.trim().split('\\n');
+  let idx = 0;
+  const readLine = () => lines[idx++] || '';
+  const readInts = () => readLine().trim().split(/\\s+/).map(Number);
+
   // Write your solution here
-}`,
-  Java: `class Solution {
-    public int smallestMissingPositive(int[] nums) {
+});`,
+  Java: `import java.util.*;
+import java.io.*;
+
+public class Main {
+    static BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
+    static StringTokenizer st;
+
+    static String nextLine() throws IOException { return br.readLine(); }
+    static int nextInt() throws IOException {
+        while (st == null || !st.hasMoreTokens()) st = new StringTokenizer(br.readLine());
+        return Integer.parseInt(st.nextToken());
+    }
+
+    public static void main(String[] args) throws IOException {
         // Write your solution here
     }
 }`,
-  'C++': `class Solution {
-public:
-    int smallestMissingPositive(vector<int>& nums) {
-        // Write your solution here
-    }
-};`,
+  'C++': `#include <bits/stdc++.h>
+using namespace std;
+
+int main() {
+    ios_base::sync_with_stdio(false);
+    cin.tie(NULL);
+
+    // Write your solution here
+
+    return 0;
+}`,
 }
 
-const sampleTests = [
-  { name: 'Test Case 0', input: '[1, 3, 6, 4, 1, 2]', output: '5', status: 'passed' },
-  { name: 'Test Case 1', input: '[1, 2, 0]', output: '3', status: 'passed' },
-  { name: 'Test Case 2', input: '[7, 8, 9, 11, 12]', output: '1', status: 'passed' },
-]
+const formatTimer = (seconds: number) => {
+  const safeSeconds = Math.max(0, seconds)
+  const hours = Math.floor(safeSeconds / 3600)
+  const minutes = Math.floor((safeSeconds % 3600) / 60)
+  const secs = safeSeconds % 60
+  return hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+}
 
 const practiceCategories = [
   { id: 'arrays', name: 'Arrays', description: 'Indexing, two pointers, and sliding windows', icon: Layers3 },
@@ -50,41 +87,21 @@ const practiceCategories = [
 ] as const
 
 function App() {
-  const [practiceView, setPracticeView] = useState<'landing' | 'workspace'>(
-    localStorage.getItem('testmeman.hasVisited') === 'true' ? 'workspace' : 'landing',
-  )
+  const [practiceView, setPracticeView] = useState<'landing' | 'workspace'>('landing')
+  const [selectedCategories, setSelectedCategories] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('testmeman.preferredCategories') || '["arrays"]') } catch { return ['arrays'] }
+  })
   const [selectedTopic, setSelectedTopic] = useState<string>(
     localStorage.getItem('testmeman.preferredTopic') || 'arrays',
   )
   const [selectedDifficulty, setSelectedDifficulty] = useState<'easy' | 'medium' | 'hard'>(
     (localStorage.getItem('testmeman.preferredDifficulty') as 'easy' | 'medium' | 'hard') || 'medium',
   )
-  const [selectedLanguage, setSelectedLanguage] = useState<ProgrammingLanguage>(
-    (localStorage.getItem('testmeman.preferredLanguage') as ProgrammingLanguage) || 'Python',
-  )
+  const [customPromptText, setCustomPromptText] = useState<string>('')
   const [resumeAttempt, setResumeAttempt] = useState<AttemptDto | null>(null)
   const [language, setLanguage] = useState<ProgrammingLanguage>('Python')
-  const [code, setCode] = useState(starterCode.Python)
-  const [question, setQuestion] = useState<QuestionDto>({
-    id: 'demo-question',
-    title: 'Find the Smallest Missing Positive',
-    difficulty: 'medium',
-    topic: 'arrays',
-    statement: 'Given an unsorted integer array nums, return the smallest positive integer that is missing.',
-    constraints: ['1 <= nums.length <= 10^5', '-2^31 <= nums[i] <= 2^31 - 1'],
-    examples: [
-      { input: '[1, 3, 6, 4, 1, 2]', output: '5' },
-      { input: '[1, 2, 0]', output: '3' },
-    ],
-    starterCode: starterCode as QuestionDto['starterCode'],
-    testCases: sampleTests.map((test, index) => ({
-      id: String(index),
-      name: test.name,
-      input: test.input,
-      expectedOutput: test.output,
-      hidden: false,
-    })),
-  })
+  const [code, setCode] = useState(defaultStarterCode.Python)
+  const [question, setQuestion] = useState<QuestionDto | null>(null)
   const [activeTab, setActiveTab] = useState<'testcases' | 'custom' | 'result'>('testcases')
   const [outputCollapsed, setOutputCollapsed] = useState(false)
   const [editorTab, setEditorTab] = useState<'solution' | 'submissions'>('solution')
@@ -98,8 +115,12 @@ function App() {
   const [submissionHistory, setSubmissionHistory] = useState<SubmissionResultDto[]>([])
   const [customInput, setCustomInput] = useState('')
   const [customOutput, setCustomOutput] = useState('')
+  const [customExpectedOutput, setCustomExpectedOutput] = useState('')
   const [customMode, setCustomMode] = useState(false)
   const [activeAttempt, setActiveAttempt] = useState<AttemptDto | null>(null)
+  const [practiceTimer, setPracticeTimer] = useState<PracticeTimerDto | null>(null)
+  const [quitDialogOpen, setQuitDialogOpen] = useState(false)
+  const [quitting, setQuitting] = useState(false)
   const [draftStatus, setDraftStatus] = useState<'saved' | 'saving'>('saved')
   const [expandedCase, setExpandedCase] = useState<string | null>(null)
   const revisionRef = useRef(1)
@@ -107,15 +128,19 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system')
   const [fontSize, setFontSize] = useState(13)
   const [wordWrap, setWordWrap] = useState(false)
+  useEffect(() => {
+    localStorage.removeItem('testmeman.hasVisited')
+  }, [])
+
   const [problemWidth, setProblemWidth] = useState(() => {
     const saved = Number(localStorage.getItem('testmeman.layout.problemWidth'))
-    return saved >= 320 && saved <= 700 ? saved : 560
+    return saved >= 320 && saved <= 700 ? saved : Math.min(540, Math.floor(window.innerWidth * 0.45))
   })
   const [outputHeight, setOutputHeight] = useState(() => {
     const saved = Number(localStorage.getItem('testmeman.layout.outputHeight'))
-    return saved >= 170 && saved <= 500 ? saved : 220
+    return saved >= 140 && saved <= 450 ? saved : 200
   })
-  const visibleTests = question.testCases.filter((test) => !test.hidden)
+  const visibleTests = question ? question.testCases.filter((test) => !test.hidden) : []
 
   useEffect(() => {
     if (practiceView !== 'landing') return
@@ -139,6 +164,7 @@ function App() {
       .then((attempt) => {
         if (cancelled) return
         setActiveAttempt(attempt)
+        setPracticeTimer(attempt.timer ?? null)
         setQuestion(attempt.question)
         revisionRef.current = attempt.revision + 1
 
@@ -176,6 +202,34 @@ function App() {
       cancelled = true
     }
   }, [practiceView])
+
+  useEffect(() => {
+    if (!activeAttempt?.timer) return
+    setPracticeTimer(activeAttempt.timer)
+  }, [activeAttempt])
+
+  useEffect(() => {
+    if (!practiceTimer) return
+    if (practiceTimer.status !== 'running' || !practiceTimer.expiresAt) {
+      setPracticeTimer((current) => current ? { ...current, remainingSeconds: current.remainingSeconds } : current)
+      document.title = practiceTimer.status === 'paused'
+        ? '(Timer paused) TestMeMan'
+        : practiceTimer.status === 'expired'
+          ? '(Time expired) TestMeMan'
+          : 'TestMeMan'
+      return
+    }
+    const update = () => {
+      const remainingSeconds = Math.max(0, Math.ceil((Date.parse(practiceTimer.expiresAt as string) - Date.now()) / 1000))
+      setPracticeTimer((current) => remainingSeconds === 0
+        ? current ? { ...current, status: 'expired', remainingSeconds: 0, expiredAt: current.expiredAt ?? new Date().toISOString() } : current
+        : current ? { ...current, remainingSeconds } : current)
+      document.title = remainingSeconds > 0 ? `(${formatTimer(remainingSeconds)}) TestMeMan` : '(Time expired) TestMeMan'
+    }
+    update()
+    const interval = window.setInterval(update, 1000)
+    return () => window.clearInterval(interval)
+  }, [practiceTimer?.status, practiceTimer?.expiresAt])
 
   useEffect(() => {
     if (!activeAttempt) return
@@ -227,6 +281,15 @@ function App() {
   }, [fontSize, wordWrap])
 
   useEffect(() => {
+    if (!quitDialogOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !quitting) setQuitDialogOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [quitDialogOpen, quitting])
+
+  useEffect(() => {
     localStorage.setItem('testmeman.layout.problemWidth', String(problemWidth))
   }, [problemWidth])
 
@@ -271,26 +334,36 @@ function App() {
 
   const changeLanguage = (value: ProgrammingLanguage) => {
     setLanguage(value)
-    setCode(question.starterCode[value] || starterCode[value])
+    setCode(question?.starterCode?.[value] || defaultStarterCode[value] || '')
+  }
+
+  const toggleCategory = (id: string) => {
+    setSelectedCategories((prev) => {
+      const next = prev.includes(id) ? prev.filter((c) => c !== id) : [...prev, id]
+      return next.length === 0 ? prev : next // keep at least one
+    })
+    setSelectedTopic(id) // keep selectedTopic in sync with last-clicked
   }
 
   const startPractice = () => {
     setGenerating(true)
     setGenerationError('')
-    localStorage.setItem('testmeman.hasVisited', 'true')
-    localStorage.setItem('testmeman.preferredTopic', selectedTopic)
+    const topic = selectedCategories[0] ?? 'arrays'
+    localStorage.setItem('testmeman.preferredTopic', topic)
     localStorage.setItem('testmeman.preferredDifficulty', selectedDifficulty)
-    localStorage.setItem('testmeman.preferredLanguage', selectedLanguage)
+    localStorage.setItem('testmeman.preferredCategories', JSON.stringify(selectedCategories))
     apiClient.createNewAttempt({
-      topic: selectedTopic,
+      topic,
       difficulty: selectedDifficulty,
-      language: selectedLanguage,
+      categories: selectedCategories,
+      customPrompt: customPromptText.trim() || undefined,
     })
       .then((attempt) => {
         setActiveAttempt(attempt)
+        setPracticeTimer(attempt.timer ?? null)
         setQuestion(attempt.question)
         setLanguage(attempt.language)
-        setCode(attempt.question.starterCode?.[attempt.language] ?? starterCode[attempt.language])
+        setCode(attempt.question.starterCode?.[attempt.language] ?? defaultStarterCode[attempt.language])
         revisionRef.current = attempt.revision + 1
         setSelectedTest(0)
         setSubmitted(false)
@@ -310,11 +383,49 @@ function App() {
   }
 
   const resumePractice = () => {
-    localStorage.setItem('testmeman.hasVisited', 'true')
     setPracticeView('workspace')
   }
 
+  const updatePracticeTimer = (
+    action: 'pause' | 'resume' | 'reset' | 'extend',
+    seconds = 300,
+  ) => {
+    if (!activeAttempt) return
+    apiClient.updateAttemptTimer(activeAttempt.id, action, seconds)
+      .then((timer) => setPracticeTimer(timer))
+      .catch((error) => {
+        setGenerationError(error instanceof Error ? error.message : 'Unable to update the timer.')
+      })
+  }
+
+  const quitTest = () => {
+    if (!activeAttempt || quitting) return
+    setQuitting(true)
+    const revision = revisionRef.current++
+    localStorage.setItem(`testmeman:draft:${activeAttempt.id}`, JSON.stringify({
+      code,
+      language,
+      revision,
+      updatedAt: new Date().toISOString(),
+    }))
+    apiClient.quitAttempt(activeAttempt.id, { language, code, revision })
+      .then(() => {
+        localStorage.removeItem(`testmeman:draft:${activeAttempt.id}`)
+        setQuitDialogOpen(false)
+        setPracticeTimer(null)
+        setActiveAttempt(null)
+        document.title = 'TestMeMan'
+        setPracticeView('landing')
+      })
+      .catch((error) => {
+        setGenerationError(error instanceof Error ? error.message : 'Unable to quit the test.')
+        setQuitDialogOpen(false)
+      })
+      .finally(() => setQuitting(false))
+  }
+
   const runCode = () => {
+    if (!question) return
     setRunning(true)
     setHasSubmitted(true)
     setOutputCollapsed(false)
@@ -352,7 +463,19 @@ function App() {
       })
   }
 
+  useEffect(() => {
+    const handleCtrlEnter = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault()
+        if (!running) runCode()
+      }
+    }
+    window.addEventListener('keydown', handleCtrlEnter)
+    return () => window.removeEventListener('keydown', handleCtrlEnter)
+  }, [code, language, question, running])
+
   const submitCode = () => {
+    if (!question) return
     setRunning(true)
     setOutputCollapsed(false)
     apiClient.submit({
@@ -392,6 +515,7 @@ function App() {
   }
 
   const runCustomTest = () => {
+    if (!question) return
     setRunning(true)
     setHasSubmitted(true)
     setOutputCollapsed(false)
@@ -404,6 +528,7 @@ function App() {
       code,
       submitted: false,
       customInput,
+      customExpectedOutput,
     })
       .then((result) => {
         setSubmitted(false)
@@ -435,15 +560,16 @@ function App() {
   const generateQuestion = () => {
     setGenerating(true)
     apiClient.createNewAttempt({
-      topic: selectedTopic,
+      topic: selectedCategories[0] ?? selectedTopic,
       difficulty: selectedDifficulty,
-      language: selectedLanguage,
+      categories: selectedCategories,
     })
       .then((attempt) => {
         setActiveAttempt(attempt)
+        setPracticeTimer(attempt.timer ?? null)
         setQuestion(attempt.question)
         setLanguage(attempt.language)
-        setCode(attempt.question.starterCode?.[attempt.language] ?? starterCode[attempt.language])
+        setCode(attempt.question.starterCode?.[attempt.language] ?? defaultStarterCode[attempt.language])
         revisionRef.current = attempt.revision + 1
         setSelectedTest(0)
         setSubmitted(false)
@@ -509,7 +635,8 @@ function App() {
                 <div className="preview-category"><LandingIcon size={15} /> {selectedCategory.name}</div>
                 <strong>{selectedDifficulty === 'hard' ? 'Optimize the complete solution' : selectedDifficulty === 'easy' ? 'Solve the core problem' : 'Design an efficient approach'}</strong>
                 <div className="preview-tags">
-                  <span>{selectedDifficulty}</span><span>{selectedLanguage}</span><span>Hidden tests</span>
+                  <span>{selectedDifficulty}</span><span>{selectedCategories.length > 1 ? `${selectedCategories.length} topics` : selectedCategories[0] ?? 'arrays'}</span><span>Hidden tests</span>
+                  <span><Clock3 size={10} /> {selectedDifficulty === 'easy' ? '30 min' : selectedDifficulty === 'hard' ? '60 min' : '45 min'}</span>
                 </div>
               </div>
             </div>
@@ -518,20 +645,20 @@ function App() {
           <section className="practice-selector" aria-label="Practice configuration">
             <div className="selector-heading">
               <span>01</span>
-              <div><strong>Choose a category</strong><small>Select the skill you want to practice</small></div>
+              <div><strong>Choose categories</strong><small>Select one or more topics to combine in your challenge</small></div>
             </div>
-            <div className="category-grid" role="radiogroup" aria-label="Coding category">
+            <div className="category-grid" role="group" aria-label="Coding categories">
               {practiceCategories.map((category) => {
                 const Icon = category.icon
-                const selected = selectedTopic === category.id
+                const selected = selectedCategories.includes(category.id)
                 return (
                   <button
                     key={category.id}
                     type="button"
-                    role="radio"
+                    role="checkbox"
                     aria-checked={selected}
                     className={`category-card ${selected ? 'selected' : ''}`}
-                    onClick={() => setSelectedTopic(category.id)}
+                    onClick={() => toggleCategory(category.id)}
                   >
                     <span className="category-icon"><Icon size={18} /></span>
                     <span className="category-copy"><strong>{category.name}</strong><small>{category.description}</small></span>
@@ -563,27 +690,20 @@ function App() {
                   ))}
                 </div>
               </div>
-              <div>
-                <div className="selector-heading compact">
-                  <span>03</span>
-                  <div><strong>Language</strong><small>Select your editor language</small></div>
-                </div>
-                <div className="language-options" role="radiogroup" aria-label="Programming language">
-                  {(['Python', 'JavaScript', 'Java', 'C++'] as const).map((languageOption) => (
-                    <button
-                      key={languageOption}
-                      type="button"
-                      role="radio"
-                      aria-checked={selectedLanguage === languageOption}
-                      className={selectedLanguage === languageOption ? 'active' : ''}
-                      onClick={() => setSelectedLanguage(languageOption)}
-                    >
-                      {languageOption === 'C++' ? 'C++' : languageOption}
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
+
+            <div className="selector-heading compact" style={{ marginTop: '1.25rem' }}>
+              <span>03</span>
+              <div><strong>Custom requirements</strong><small>Optionally describe what type of problem you want</small></div>
+            </div>
+            <input
+              type="text"
+              className="custom-prompt-input"
+              placeholder="e.g. graph traversal with dynamic programming, matrix rotation..."
+              value={customPromptText}
+              onChange={(e) => setCustomPromptText(e.target.value)}
+              maxLength={500}
+            />
 
             {generationError && <div className="landing-generation-error" role="alert">{generationError}</div>}
             <button className="start-practice-button" onClick={startPractice} disabled={generating}>
@@ -593,6 +713,16 @@ function App() {
             </button>
           </section>
         </div>
+      </main>
+    )
+  }
+
+  if (!question || generating) {
+    return (
+      <main className="landing-page" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '80vh', gap: '1.5rem' }}>
+        <Sparkles size={40} className="spin" style={{ color: '#6366f1' }} />
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 600 }}>Generating Unique AI Challenge...</h2>
+        <p style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.95rem' }}>Crafting original problem statement, test cases, and starter code with Gemini AI.</p>
       </main>
     )
   }
@@ -616,18 +746,27 @@ function App() {
           <a href="#">AI Generator</a>
         </nav>
         <div className="top-actions">
+          <button
+            className="quit-test-button"
+            type="button"
+            onClick={() => setQuitDialogOpen(true)}
+            disabled={!activeAttempt || quitting}
+          >
+            <LogOut size={15} />
+            Quit Test
+          </button>
           <button className="icon-button" aria-label="Notifications"><Bell size={18} /></button>
           <button className="avatar-button"><span>PR</span></button>
         </div>
       </header>
 
-      <main className="workspace" style={{ gridTemplateColumns: `${problemWidth}px 6px minmax(520px, 1fr)` }}>
+      <main className="workspace" style={{ gridTemplateColumns: `${problemWidth}px 6px minmax(360px, 1fr)` }}>
         <section className="problem-pane">
           <div className="problem-toolbar">
             <div className="breadcrumb">
               <span>Practice</span>
               <span>/</span>
-              <strong>Arrays</strong>
+              <strong>{question ? (question.topic.charAt(0).toUpperCase() + question.topic.slice(1)) : 'Problem'}</strong>
             </div>
             <button className="generate-button" onClick={generateQuestion}>
               <RefreshCw size={15} className={generating ? 'spin' : ''} />
@@ -652,6 +791,18 @@ function App() {
 
             <article className="problem-content">
               <p>{question.statement}</p>
+              {question.inputFormat && (
+                <>
+                  <h2>Input Format</h2>
+                  <p>{question.inputFormat}</p>
+                </>
+              )}
+              {question.outputFormat && (
+                <>
+                  <h2>Output Format</h2>
+                  <p>{question.outputFormat}</p>
+                </>
+              )}
 
               {question.examples.map((example, index) => (
                 <div key={`${example.input}-${index}`}>
@@ -684,21 +835,34 @@ function App() {
             if (event.key === 'ArrowRight') setProblemWidth((width) => Math.min(700, width + 20))
           }}
         />
-        <section
-          className="editor-pane"
-          style={{
-            gridTemplateRows: outputCollapsed
-              ? '50px minmax(260px, 1fr) 0px 42px 54px'
-              : `50px minmax(260px, 1fr) 6px ${outputHeight}px 54px`,
-          }}
-        >
+        <section className={`editor-pane ${outputCollapsed ? 'output-collapsed' : ''}`}>
           <div className="editor-toolbar">
             <div className="tabs">
               <button className={`tab ${editorTab === 'solution' ? 'active' : ''}`} onClick={() => setEditorTab('solution')}>Solution</button>
               <button className={`tab ${editorTab === 'submissions' ? 'active' : ''}`} onClick={() => setEditorTab('submissions')}>Submissions</button>
             </div>
             <div className="editor-actions">
+              <button className="toolbar-run-button" type="button" onClick={runCode} disabled={running} title="Run visible test cases (Ctrl+Enter)">
+                <Play size={13} fill="currentColor" /> Run
+              </button>
+              <button className="toolbar-submit-button" type="button" onClick={submitCode} disabled={running} title="Submit solution">
+                {running ? <RefreshCw size={13} className="spin" /> : <Send size={13} />}
+                Submit
+              </button>
               {activeAttempt && <span className={`draft-status ${draftStatus}`}>{draftStatus === 'saved' ? 'Draft saved' : 'Saving draft...'}</span>}
+              {practiceTimer && (
+                <div className={`practice-timer ${practiceTimer.status} ${practiceTimer.remainingSeconds <= 300 ? 'warning' : ''}`}>
+                  <Clock3 size={14} />
+                  <strong>{formatTimer(practiceTimer.remainingSeconds)}</strong>
+                  {practiceTimer.status === 'running' ? (
+                    <button type="button" aria-label="Pause timer" onClick={() => updatePracticeTimer('pause')}><Pause size={12} /></button>
+                  ) : practiceTimer.status === 'paused' ? (
+                    <button type="button" aria-label="Resume timer" onClick={() => updatePracticeTimer('resume')}><Play size={12} /></button>
+                  ) : null}
+                  <button type="button" aria-label="Reset timer" onClick={() => updatePracticeTimer('reset')}><RotateCcw size={12} /></button>
+                  <button type="button" aria-label="Extend timer by 5 minutes" onClick={() => updatePracticeTimer('extend', 300)}>+5</button>
+                </div>
+              )}
               <button className="language-button">
                 {language} <ChevronDown size={14} />
                 <select id="programming-language" name="programmingLanguage" value={language} onChange={(event) => changeLanguage(event.target.value as ProgrammingLanguage)} aria-label="Select language">
@@ -793,7 +957,8 @@ function App() {
           ) : (
           <>
           <div className="code-area">
-            <Editor
+            <div className="code-area-inner">
+              <Editor
               height="100%"
               language={{
                 Python: 'python',
@@ -819,7 +984,8 @@ function App() {
                 formatOnPaste: true,
                 smoothScrolling: true,
               }}
-            />
+              />
+            </div>
           </div>
 
           {!outputCollapsed && (
@@ -837,14 +1003,14 @@ function App() {
               }}
             />
           )}
-          <div className={`output-panel ${hasSubmitted ? '' : 'submission-hidden'} ${outputCollapsed ? 'collapsed' : ''}`}>
-            {!hasSubmitted ? (
-              <div className="submission-placeholder">
-                <span>Submit your solution to view test cases and results.</span>
-              </div>
-            ) : (
-              <>
-                <div className="output-tabs">
+          <div
+            className={`output-panel ${outputCollapsed ? 'collapsed' : ''}`}
+            style={{
+              height: outputCollapsed ? 42 : outputHeight,
+              maxHeight: 'calc(100% - 240px)',
+            }}
+          >
+            <div className="output-tabs">
                   <button
                     className={activeTab === 'testcases' ? 'active' : ''}
                     onClick={() => {
@@ -899,6 +1065,15 @@ function App() {
                         onChange={(event) => setCustomInput(event.target.value)}
                         placeholder="Enter custom test input"
                       />
+                      <label htmlFor="custom-expected-output">Expected output (optional)</label>
+                      <textarea
+                        id="custom-expected-output"
+                        name="customExpectedOutput"
+                        value={customExpectedOutput}
+                        onChange={(event) => setCustomExpectedOutput(event.target.value)}
+                        placeholder="Enter expected output to compare"
+                        className="custom-expected-output"
+                      />
                       <button className="custom-run-button" onClick={runCustomTest} disabled={running || !customInput.trim()}>
                         <Play size={14} /> Run custom test
                       </button>
@@ -938,7 +1113,11 @@ function App() {
                 </div>
               ) : (
                 <div className="result-view">
-                  {running ? (
+                  {!hasSubmitted && !running ? (
+                    <div className="submission-placeholder">
+                      <span>Click <strong>Run</strong> to test your code or <strong>Submit</strong> to evaluate all test cases.</span>
+                    </div>
+                  ) : running ? (
                     <div className="running-state"><RefreshCw size={18} className="spin" /> Running test cases...</div>
                   ) : (submitted || submissionResult?.status === 'accepted') ? (
                     <>
@@ -951,6 +1130,7 @@ function App() {
                         <div><span>Visible</span><strong>{submissionResult ? `${submissionResult.visiblePassed}/${submissionResult.visibleTotal}` : 'N/A'}</strong></div>
                         <div><span>Hidden</span><strong>{submissionResult ? `${submissionResult.hiddenPassed}/${submissionResult.hiddenTotal}` : 'N/A'}</strong></div>
                         <div><span>Language</span><strong>{language}</strong></div>
+                        {submissionResult?.submittedAfterDeadline && <div><span>Deadline</span><strong>Submitted late</strong></div>}
                       </div>
                     </>
                   ) : (
@@ -963,6 +1143,7 @@ function App() {
                         <div><span>Visible</span><strong>{submissionResult ? `${submissionResult.visiblePassed}/${submissionResult.visibleTotal}` : 'N/A'}</strong></div>
                         <div><span>Hidden</span><strong>{submissionResult ? `${submissionResult.hiddenPassed}/${submissionResult.hiddenTotal}` : 'N/A'}</strong></div>
                         <div><span>Language</span><strong>{language}</strong></div>
+                        {submissionResult?.submittedAfterDeadline && <div><span>Deadline</span><strong>Submitted late</strong></div>}
                       </div>
                     </>
                   )}
@@ -994,8 +1175,6 @@ function App() {
                 </div>
               )}
                 </div>
-              </>
-            )}
           </div>
 
           <footer className="editor-footer">
@@ -1025,6 +1204,37 @@ function App() {
         </section>
 
       </main>
+      {quitDialogOpen && (
+        <div className="quit-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !quitting) setQuitDialogOpen(false)
+        }}>
+          <div className="quit-dialog" role="dialog" aria-modal="true" aria-labelledby="quit-dialog-title" aria-describedby="quit-dialog-description">
+            <button
+              className="quit-dialog-close"
+              type="button"
+              aria-label="Close quit confirmation"
+              onClick={() => setQuitDialogOpen(false)}
+              disabled={quitting}
+            >
+              <X size={18} />
+            </button>
+            <div className="quit-dialog-icon"><LogOut size={20} /></div>
+            <h2 id="quit-dialog-title">Quit this test?</h2>
+            <p id="quit-dialog-description">
+              Your current attempt will end and you will return to the home page. Your latest code will be saved before quitting.
+            </p>
+            <div className="quit-dialog-actions">
+              <button type="button" className="quit-cancel-button" onClick={() => setQuitDialogOpen(false)} disabled={quitting}>
+                Cancel
+              </button>
+              <button type="button" className="quit-confirm-button" onClick={quitTest} disabled={quitting}>
+                {quitting ? <RefreshCw size={15} className="spin" /> : <LogOut size={15} />}
+                {quitting ? 'Quitting...' : 'Quit Test'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

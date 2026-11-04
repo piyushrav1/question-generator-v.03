@@ -12,6 +12,8 @@ export interface TestCaseDto {
   hidden: boolean
 }
 
+export type OutputComparisonMode = 'exact' | 'token' | 'json'
+
 export interface QuestionDto {
   id: string
   title: string
@@ -22,12 +24,17 @@ export interface QuestionDto {
   examples: Array<{ input: string; output: string }>
   starterCode: Record<ProgrammingLanguage, string>
   testCases: TestCaseDto[]
+  inputFormat?: string
+  outputFormat?: string
+  comparisonMode?: OutputComparisonMode
 }
 
 export interface GenerateQuestionRequest {
   topic?: string
   difficulty?: Difficulty
   language?: ProgrammingLanguage
+  categories?: string[]
+  customPrompt?: string
 }
 
 export interface SubmissionRequest {
@@ -36,6 +43,7 @@ export interface SubmissionRequest {
   code: string
   submitted: boolean
   customInput?: string
+  customExpectedOutput?: string
 }
 
 export interface SubmissionCaseResultDto {
@@ -46,6 +54,8 @@ export interface SubmissionCaseResultDto {
   actualOutput?: string
   expectedOutput?: string
   runtimeMs: number
+  mismatchLine?: number
+  mismatchColumn?: number
 }
 
 export interface SubmissionResultDto {
@@ -63,6 +73,18 @@ export interface SubmissionResultDto {
   memoryMb: number | null
   message: string
   caseResults?: SubmissionCaseResultDto[]
+  submittedAfterDeadline?: boolean
+  remainingSecondsAtSubmission?: number
+}
+
+export interface PracticeTimerDto {
+  durationSeconds: number
+  remainingSeconds: number
+  startedAt: string
+  expiresAt: string | null
+  status: 'running' | 'paused' | 'expired'
+  pauseCount: number
+  expiredAt?: string
 }
 
 export interface AttemptDto {
@@ -75,4 +97,5 @@ export interface AttemptDto {
   revision: number
   createdAt: string
   updatedAt: string
+  timer?: PracticeTimerDto
 }

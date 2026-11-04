@@ -12,6 +12,7 @@ const submissionSchema = z.object({
   code: z.string().min(20).max(100_000),
   submitted: z.boolean().default(false),
   customInput: z.string().max(10_000).optional(),
+  customExpectedOutput: z.string().max(10_000).optional(),
 })
 
 export function createSubmissionRouter(service: SubmissionService, repository: QuestionRepository): Router {

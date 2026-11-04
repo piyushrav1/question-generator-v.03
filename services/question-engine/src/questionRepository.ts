@@ -1,18 +1,12 @@
-import type { AttemptDto, Difficulty, ProgrammingLanguage, QuestionDto, TestCaseDto } from '../../../packages/shared/src/types.js'
+import type { AttemptDto, Difficulty, OutputComparisonMode, PracticeTimerDto, ProgrammingLanguage, QuestionDto, TestCaseDto } from '../../../packages/shared/src/types.js'
 import { MongoClient, type Db } from 'mongodb'
 import type { SubmissionResultDto } from '../../../packages/shared/src/types.js'
 import { randomUUID } from 'node:crypto'
 
-const starterCode: Record<ProgrammingLanguage, string> = {
-  Python: 'def smallest_missing_positive(nums):\n    # Write your solution here\n    pass',
-  JavaScript: 'function smallestMissingPositive(nums) {\n  // Write your solution here\n}',
-  Java: 'class Solution {\n    public int smallestMissingPositive(int[] nums) {\n        // Write your solution here\n    }\n}',
-  'C++': 'class Solution {\npublic:\n    int smallestMissingPositive(vector<int>& nums) {\n        // Write your solution here\n    }\n};',
-}
-
 export class QuestionRepository {
   private readonly questions = new Map<string, QuestionDto>()
   private readonly attempts = new Map<string, AttemptDto>()
+  private readonly submissions = new Map<string, SubmissionResultDto[]>()
   private readonly client?: MongoClient
   private readonly databaseName: string
   private db?: Db
@@ -20,38 +14,30 @@ export class QuestionRepository {
   constructor(mongoUri?: string, databaseName = 'testmeman') {
     this.databaseName = databaseName
     this.client = mongoUri ? new MongoClient(mongoUri) : undefined
-    const demoQuestion = this.create({
-      topic: 'arrays',
-      difficulty: 'medium',
-    })
-    this.questions.set('demo-question', demoQuestion)
   }
 
-  create(input: { topic: string; difficulty: Difficulty }): QuestionDto {
-    const id = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-    const testCases: TestCaseDto[] = [
-      { id: '0', name: 'Test Case 0', input: '[1, 3, 6, 4, 1, 2]', expectedOutput: '5', hidden: false },
-      { id: '1', name: 'Test Case 1', input: '[1, 2, 0]', expectedOutput: '3', hidden: false },
-      { id: '2', name: 'Test Case 2', input: '[7, 8, 9, 11, 12]', expectedOutput: '1', hidden: false },
-      { id: 'h1', name: 'Hidden Test Case 1', input: '[1]', expectedOutput: '2', hidden: true },
-      { id: 'h2', name: 'Hidden Test Case 2', input: '[3, 4, -1, 1]', expectedOutput: '2', hidden: true },
-    ]
-    const question: QuestionDto = {
-      id,
-      title: 'Find the Smallest Missing Positive',
-      difficulty: input.difficulty,
-      topic: input.topic,
-      statement: 'Given an unsorted integer array nums, return the smallest positive integer that is missing.',
-      constraints: ['1 <= nums.length <= 10^5', '-2^31 <= nums[i] <= 2^31 - 1'],
-      examples: [
-        { input: '[1, 3, 6, 4, 1, 2]', output: '5' },
-        { input: '[1, 2, 0]', output: '3' },
-      ],
-      starterCode,
-      testCases,
+  async findAttemptedQuestionIds(ownerId: string): Promise<string[]> {
+    const db = await this.getDatabase()
+    if (db) {
+      const attempts = await db.collection<AttemptDto & { ownerId: string }>('attempts')
+        .find({ ownerId })
+        .project<{ questionId: string }>({ questionId: 1 })
+        .toArray()
+      return attempts.map((a) => a.questionId).filter(Boolean)
     }
-    this.questions.set(id, question)
-    return question
+    return Array.from(this.attempts.values())
+      .filter((a) => (a as AttemptDto & { ownerId?: string }).ownerId === ownerId)
+      .map((a) => a.questionId)
+  }
+
+  async findAttemptedQuestionTitles(ownerId: string): Promise<string[]> {
+    const ids = await this.findAttemptedQuestionIds(ownerId)
+    const titles: string[] = []
+    for (const id of ids) {
+      const q = await this.findById(id)
+      if (q?.title) titles.push(q.title)
+    }
+    return titles
   }
 
   async save(input: {
@@ -64,11 +50,14 @@ export class QuestionRepository {
       examples: Array<{ input: string; output: string }>
       starterCode: Record<ProgrammingLanguage, string>
       testCases: TestCaseDto[]
+      inputFormat?: string
+      outputFormat?: string
+      comparisonMode?: OutputComparisonMode
     }
   }): Promise<QuestionDto> {
     const id = `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const validTestCases = input.generated.testCases.filter((testCase) =>
-      typeof testCase.input === 'string' && testCase.input.trim().length > 0
+      typeof testCase.input === 'string' && testCase.input.trim().length > 0,
     )
     const question: QuestionDto = {
       id,
@@ -80,6 +69,9 @@ export class QuestionRepository {
       examples: input.generated.examples,
       starterCode: input.generated.starterCode,
       testCases: validTestCases,
+      inputFormat: input.generated.inputFormat,
+      outputFormat: input.generated.outputFormat,
+      comparisonMode: input.generated.comparisonMode,
     }
     this.questions.set(id, question)
     await this.persistQuestion(question)
@@ -123,6 +115,7 @@ export class QuestionRepository {
 
   async createAttempt(ownerId: string, question: QuestionDto, language: ProgrammingLanguage, code: string): Promise<AttemptDto> {
     const now = new Date().toISOString()
+    const durationSeconds = question.difficulty === 'easy' ? 30 * 60 : question.difficulty === 'hard' ? 60 * 60 : 45 * 60
     const attempt: AttemptDto = {
       id: `a-${randomUUID()}`,
       questionId: question.id,
@@ -133,6 +126,14 @@ export class QuestionRepository {
       revision: 1,
       createdAt: now,
       updatedAt: now,
+      timer: {
+        durationSeconds,
+        remainingSeconds: durationSeconds,
+        startedAt: now,
+        expiresAt: new Date(Date.now() + durationSeconds * 1000).toISOString(),
+        status: 'running',
+        pauseCount: 0,
+      },
     }
     const db = await this.getDatabase()
     if (!db) {
@@ -147,9 +148,12 @@ export class QuestionRepository {
   async saveAttemptDraft(ownerId: string, attemptId: string, language: ProgrammingLanguage, code: string, revision: number): Promise<AttemptDto | undefined> {
     const db = await this.getDatabase()
     if (!db) {
-      const stored = Array.from(this.attempts.entries()).find(([key, attempt]) =>
+      let stored = Array.from(this.attempts.entries()).find(([key, attempt]) =>
         key.startsWith(`${ownerId}:`) && attempt.id === attemptId,
       )
+      if (!stored) {
+        stored = Array.from(this.attempts.entries()).find(([_, attempt]) => attempt.id === attemptId)
+      }
       if (!stored) return undefined
       const attempt = stored[1]
       attempt.language = language
@@ -158,14 +162,135 @@ export class QuestionRepository {
       attempt.updatedAt = new Date().toISOString()
       return attempt
     }
-    const result = await db.collection<AttemptDto & { ownerId: string }>('attempts').findOneAndUpdate(
+    let result = await db.collection<AttemptDto & { ownerId: string }>('attempts').findOneAndUpdate(
       { id: attemptId, ownerId, status: 'active', revision: { $lte: revision } },
       { $set: { language, code, revision, updatedAt: new Date().toISOString() } },
       { returnDocument: 'after' },
     )
+    if (!result) {
+      result = await db.collection<AttemptDto & { ownerId: string }>('attempts').findOneAndUpdate(
+        { id: attemptId, status: 'active' },
+        { $set: { ownerId, language, code, revision, updatedAt: new Date().toISOString() } },
+        { returnDocument: 'after' },
+      )
+    }
     if (!result) return undefined
     const question = await this.findById(result.questionId)
     return question ? { ...result, question } : undefined
+  }
+
+  async findAttempt(ownerId: string, attemptId: string): Promise<AttemptDto | undefined> {
+    const db = await this.getDatabase()
+    if (!db) {
+      let stored = Array.from(this.attempts.entries()).find(([key, attempt]) =>
+        key === `${ownerId}:${attemptId}`,
+      )
+      if (!stored) {
+        stored = Array.from(this.attempts.entries()).find(([_, attempt]) => attempt.id === attemptId)
+      }
+      if (!stored) return undefined
+      const attempt = stored[1] as AttemptDto
+      const question = await this.findById(attempt.questionId)
+      return question ? { ...attempt, question } : undefined
+    }
+    let stored = await db.collection<AttemptDto & { ownerId: string }>('attempts').findOne({
+      id: attemptId,
+      ownerId,
+      status: 'active',
+    })
+    if (!stored) {
+      stored = await db.collection<AttemptDto & { ownerId: string }>('attempts').findOne({
+        id: attemptId,
+        status: 'active',
+      })
+    }
+    if (!stored) return undefined
+    const question = await this.findById(stored.questionId)
+    return question ? { ...stored, question } : undefined
+  }
+
+  async updateAttemptTimer(
+    ownerId: string,
+    attemptId: string,
+    action: 'pause' | 'resume' | 'reset' | 'extend',
+    seconds = 300,
+  ): Promise<AttemptDto | undefined> {
+    const attempt = await this.findAttempt(ownerId, attemptId)
+    if (!attempt) return undefined
+    const now = Date.now()
+    let timer = this.normalizeTimer(attempt)
+
+    if (timer.status === 'running' && timer.expiresAt && Date.parse(timer.expiresAt) <= now) {
+      timer = { ...timer, status: 'expired', remainingSeconds: 0, expiresAt: timer.expiresAt, expiredAt: timer.expiredAt ?? new Date(now).toISOString() }
+    } else if (timer.status === 'running' && timer.expiresAt) {
+      timer.remainingSeconds = Math.max(0, Math.ceil((Date.parse(timer.expiresAt) - now) / 1000))
+    }
+
+    if (action === 'pause' && timer.status === 'running') {
+      timer = { ...timer, status: 'paused', expiresAt: null, pauseCount: timer.pauseCount + 1 }
+    } else if (action === 'resume' && timer.status === 'paused' && timer.remainingSeconds > 0) {
+      timer = { ...timer, status: 'running', expiresAt: new Date(now + timer.remainingSeconds * 1000).toISOString() }
+    } else if (action === 'reset') {
+      timer = {
+        ...timer,
+        remainingSeconds: timer.durationSeconds,
+        startedAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + timer.durationSeconds * 1000).toISOString(),
+        status: 'running',
+        expiredAt: undefined,
+      }
+    } else if (action === 'extend' && timer.status !== 'expired') {
+      timer.remainingSeconds += seconds
+      timer.durationSeconds += seconds
+      if (timer.status === 'running') {
+        timer.expiresAt = new Date(now + timer.remainingSeconds * 1000).toISOString()
+      }
+    } else if (action === 'extend' && timer.status === 'expired') {
+      timer.remainingSeconds = seconds
+      timer.durationSeconds += seconds
+      timer.status = 'running'
+      timer.startedAt = new Date(now).toISOString()
+      timer.expiresAt = new Date(now + seconds * 1000).toISOString()
+      timer.expiredAt = undefined
+    }
+
+    attempt.timer = timer
+    attempt.updatedAt = new Date(now).toISOString()
+    const db = await this.getDatabase()
+    if (!db) {
+      const key = `${ownerId}:${attemptId}`
+      const stored = this.attempts.get(key)
+      if (stored) Object.assign(stored, { timer, updatedAt: attempt.updatedAt })
+      return attempt
+    }
+    const result = await db.collection<AttemptDto & { ownerId: string }>('attempts').findOneAndUpdate(
+      { id: attemptId, ownerId, status: 'active' },
+      { $set: { timer, updatedAt: attempt.updatedAt } },
+      { returnDocument: 'after' },
+    )
+    if (!result) return undefined
+    return { ...result, question: attempt.question }
+  }
+
+  normalizeTimer(attempt: AttemptDto): PracticeTimerDto {
+    if (attempt.timer) {
+      const timer = attempt.timer
+      if (timer.status === 'running' && timer.expiresAt) {
+        const remaining = Math.max(0, Math.ceil((Date.parse(timer.expiresAt) - Date.now()) / 1000))
+        if (remaining === 0) {
+          return { ...timer, status: 'expired', remainingSeconds: 0, expiredAt: timer.expiredAt ?? new Date().toISOString() }
+        }
+        return { ...timer, remainingSeconds: remaining }
+      }
+      return timer
+    }
+    const durationSeconds = attempt.question.difficulty === 'easy' ? 1800 : attempt.question.difficulty === 'hard' ? 3600 : 2700
+    const startedAt = attempt.createdAt
+    const expiresAt = new Date(Date.parse(startedAt) + durationSeconds * 1000).toISOString()
+    const remainingSeconds = Math.max(0, Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000))
+    return remainingSeconds === 0
+      ? { durationSeconds, remainingSeconds: 0, startedAt, expiresAt, status: 'expired', pauseCount: 0, expiredAt: expiresAt }
+      : { durationSeconds, remainingSeconds, startedAt, expiresAt, status: 'running', pauseCount: 0 }
   }
 
   async abandonAttempt(ownerId: string, attemptId: string): Promise<void> {
@@ -188,13 +313,18 @@ export class QuestionRepository {
 
   async saveSubmission(ownerId: string, result: SubmissionResultDto): Promise<void> {
     const db = await this.getDatabase()
-    if (!db) return
+    if (!db) {
+      const key = `${ownerId}:${result.questionId}`
+      const history = this.submissions.get(key) ?? []
+      this.submissions.set(key, [result, ...history].slice(0, 20))
+      return
+    }
     await db.collection<SubmissionResultDto & { ownerId: string }>('submissions').insertOne({ ...result, ownerId })
   }
 
   async findSubmissions(ownerId: string, questionId: string): Promise<SubmissionResultDto[]> {
     const db = await this.getDatabase()
-    if (!db) return []
+    if (!db) return this.submissions.get(`${ownerId}:${questionId}`) ?? []
     return db.collection<SubmissionResultDto & { ownerId: string }>('submissions')
       .find({ ownerId, questionId, submitted: true })
       .sort({ _id: -1 })
