@@ -1,113 +1,146 @@
 # TestMeMan
 
-TestMeMan is an AI-assisted coding practice platform. This repository contains the React frontend and the TypeScript API foundation for a coding workspace with question generation, test-case management, submissions, hints, and isolated execution integration points.
+TestMeMan is an AI-powered competitive programming and technical interview practice platform. It combines real-time problem generation powered by Google Gemini, an independent AI verification auditor, an isolated multi-language code execution engine, and a Monaco-based coding workspace.
 
-## Repository Status
+---
 
-The frontend is implemented and runnable. The API currently uses an in-memory development repository and a mock submission evaluator. Real AI generation, database persistence, authentication, and secure code execution are designed as replaceable integration boundaries.
+## Key Features
 
-## Technology
+- **6-Stage Closed-Loop Question Pipeline**:
+  1. Category & difficulty selection (Arrays, Stacks, Trees, DP, Graphs, etc. with Easy/Medium/Hard).
+  2. Gemini problem generation with statements, constraints, and raw `stdin` test cases.
+  3. **Independent Question Auditor**: A dedicated senior CP judge prompt that scrutinizes mathematical invariants, edge cases, cycle handling, and ambiguity before approving.
+  4. Sandbox execution of reference Python solutions.
+  5. Authentic expected output computation from reference execution (eliminating hallucinated outputs).
+  6. Persistence to database with hidden test cases strictly redacted from public payloads.
+- **Universal Multi-Language Runtime**:
+  - Full execution support for **Python 3**, **JavaScript (Node.js)**, **Java 17**, and **C++ (G++20)**.
+  - Universal raw `stdin` tokenization compatible across all four languages without boilerplate format mismatches.
+  - Solution skeletons provided via starter code without leaking answers.
+- **Monaco Code Workspace**:
+  - Full Monaco editor integration with theme switching (Light, Dark, System), configurable font size, and word wrap.
+  - Pinned bottom footer with **Custom test cases**, **Run**, and **Submit** actions.
+  - Dual quick-action **Run** and **Submit** controls in the editor toolbar.
+  - Keyboard shortcut: `Ctrl + Enter` (or `Cmd + Enter`) to run visible tests immediately.
+  - Always-visible test case browser, custom input runner, and detailed per-test execution metrics (runtime ms, actual vs. expected output).
+  - Interactive practice timer with pause, resume, extend (+5m), and reset controls.
+- **Dual Persistence Architecture**:
+  - Production-ready MongoDB repository.
+  - In-memory development repository with preloaded curated questions for seamless local testing.
 
-- React 19 and TypeScript
-- Vite
-- Express and TypeScript
-- Zod request validation
-- Helmet and structured HTTP logging
-- Shared TypeScript API contracts
-- Lucide React
+---
+
+## Technology Stack
+
+- **Frontend**: React 19, TypeScript, Vite, Monaco Editor (`@monaco-editor/react`), Lucide React.
+- **Backend**: Express, TypeScript, Zod, Helmet, Pino HTTP logging.
+- **AI Engine**: Google Gemini API (`@google/genai`) with fallback chains across modern models (`gemini-3.5-flash-lite`, `gemini-flash-lite-latest`, `gemini-3.5-flash`, etc.).
+- **Execution Engine**: Sandboxed code runner supporting Python, JavaScript, Java, and C++.
+- **Database**: MongoDB with automatic in-memory fallback.
+
+---
 
 ## Getting Started
 
-### Requirements
+### Prerequisites
 
 - Node.js 18 or newer
 - npm
+- (Optional) Docker (for containerized execution)
+- (Optional) MongoDB instance
 
-### Install
+### Installation & Environment Setup
 
 ```powershell
+# 1. Install dependencies across all monorepo packages
 npm.cmd install
+
+# 2. Set up environment configuration files
 Copy-Item apps/api/.env.example apps/api/.env
 Copy-Item apps/web/.env.example apps/web/.env
 ```
 
-### Run Frontend and API
+Open `apps/api/.env` and provide your Gemini API key:
+
+```env
+GEMINI_API_KEY=your_gemini_api_key_here
+PORT=4000
+# Optional: MONGODB_URI=mongodb://localhost:27017
+# Optional: MONGODB_DB_NAME=testmeman
+```
+
+### Running the Application
 
 ```powershell
+# Start both Frontend and API together
 npm.cmd run dev:all
 ```
 
-- Frontend: `http://127.0.0.1:5173`
-- API: `http://127.0.0.1:4000`
-- Health endpoint: `http://127.0.0.1:4000/api/health`
+- **Frontend Application**: `http://localhost:5173`
+- **Backend API**: `http://localhost:4000`
+- **API Health Check**: `http://localhost:4000/api/health`
 
-### Run Separately
+Alternatively, you can run them in separate terminals:
 
 ```powershell
-npm.cmd run dev
+# Terminal 1: API Server
 npm.cmd run server
+
+# Terminal 2: Web Client
+npm.cmd run dev
 ```
 
-## Commands
+---
 
-| Command | Purpose |
+## Available Commands
+
+| Command | Description |
 |---|---|
-| `npm.cmd run dev` | Start the frontend development server |
-| `npm.cmd run server` | Start the API with file watching |
-| `npm.cmd run dev:all` | Start frontend and API together |
-| `npm.cmd run typecheck` | Type-check frontend and backend |
-| `npm.cmd run build` | Create the frontend production build |
-| `npm.cmd run check` | Run type checks and the production build |
+| `npm.cmd run dev:all` | Start both the frontend and backend concurrently |
+| `npm.cmd run dev` | Start the Vite development server for the web app |
+| `npm.cmd run server` | Start the Express backend with hot-reload (`tsx watch`) |
+| `npm.cmd run typecheck` | Perform TypeScript type checks across client and server |
+| `npm.cmd run build` | Build the web frontend for production |
+| `npm.cmd run check` | Run both type checks and the production build |
 
-## Project Layout
+---
+
+## Project Structure
 
 ```text
-apps/
-  web/                 React frontend application
-  api/                 Express API application
-
-services/
-  question-engine/     AI question generation and validation
-  execution-engine/    Submission execution and evaluation integration
-
-packages/
-  packages/shared/      API contracts and shared domain utilities
-  ui/                  Reusable frontend components and UI primitives
-
-infra/
-  docker/              Container configuration
-
-docs/
-  architecture/        Architecture documentation
-
-scripts/               Repository automation
+├── apps/
+│   ├── api/                     # Express REST API
+│   │   ├── server/src/          # Routes, controllers, middlewares, and server bootstrap
+│   │   └── tsconfig.server.json
+│   └── web/                     # React 19 + Vite frontend
+│       ├── src/                 # Workspace UI, Monaco configuration, services
+│       └── vite.config.ts
+├── services/
+│   ├── question-engine/         # AI generation, independent CP auditor, repository
+│   │   ├── src/geminiProvider.ts
+│   │   ├── src/questionAuditor.ts
+│   │   ├── src/questionService.ts
+│   │   └── src/questionRepository.ts
+│   └── execution-engine/        # Code execution, Docker sandbox runner, submission evaluator
+│       ├── src/codeRunner.ts
+│       ├── src/dockerCodeRunner.ts
+│       └── src/submissionService.ts
+├── packages/
+│   ├── shared/                  # Common TypeScript interfaces, DTOs, and schemas
+│   └── ui/                      # Reusable UI component library
+└── docs/
+    └── architecture/            # Architecture decision records and platform specs
 ```
 
-Additional files:
+---
 
-- [Architecture](docs/architecture/README.md)
-- [API reference](docs/API.md)
-- [Contributing guide](docs/CONTRIBUTING.md)
-- [Platform roadmap](docs/PLATFORM-ROADMAP.md)
+## Security & Production Guidelines
 
-## Configuration
+- **Sandbox Isolation**: Never execute untrusted user-submitted code directly within the Express server host process. The execution engine is designed to delegate code execution to isolated Docker containers or ephemeral sandbox runners with strict CPU, memory, timeout, and network isolation limits.
+- **Credential & Test Case Protection**: Hidden test case outputs and reference solutions are scrubbed by `QuestionRepository` and `QuestionService` prior to returning responses to client applications.
 
-Copy the environment templates into `apps/api/.env` and `apps/web/.env`, then change values for your environment.
-
-Frontend variables are declared by the application through Vite. API variables are read by the server configuration module.
-
-## Integration Notes
-
-- Replace `QuestionRepository` with a database repository without changing route contracts.
-- Implement an AI provider adapter in the question service.
-- Implement submission evaluation through a queue and isolated execution workers.
-- Store authentication context in Express middleware after integrating with the existing identity platform.
-- Keep hidden test-case output out of public question responses.
-
-## Production Safety
-
-Do not run submitted user code inside the Express API process. Production submissions require isolated containers or a dedicated execution service with CPU, memory, time, network, filesystem, and process controls.
+---
 
 ## License
 
-No license has been added. Add an approved license before distributing or open-sourcing the project.
+MIT
