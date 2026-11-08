@@ -1,69 +1,104 @@
-# Architecture
+# Platform Architecture
 
 ## Overview
 
-TestMeMan is organized as one repository containing an independent React frontend and an Express TypeScript API. The code paths are separated so they can be deployed together or moved into separate services.
+TestMeMan is built as a modular monorepo combining an interactive React 19 frontend with a resilient Express TypeScript API, backed by a dual-engine question pipeline and an isolated code execution runner.
 
-## Repository Structure
+---
 
-```text
-apps/web/src/           React frontend
-apps/api/server/src/    Express API application
-services/question-engine/ Question generation and validation
-services/execution-engine/ Submission evaluation integration
-packages/shared/src/    Contracts shared by frontend and backend
+## Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph Client ["Frontend (React 19 + Monaco)"]
+        UI["Practice Workspace & Topbar"]
+        Monaco["Monaco Code Editor (Isolated Box)"]
+        TestTabs["Test Case & Results Tabs"]
+        Timer["Practice Countdown Timer"]
+    end
+
+    subgraph API ["Express API Gateway"]
+        AuthMiddleware["Security & Headers (Helmet)"]
+        Routes["API Routes (/questions, /submissions, /attempts)"]
+        ZodValidator["Zod Schema Validation"]
+    end
+
+    subgraph QuestionEngine ["Question Engine Service"]
+        QService["QuestionService Orchestrator"]
+        GeminiGen["Gemini Provider (Model Fallback)"]
+        Auditor["Independent Question Auditor"]
+        CuratedLib["Curated Practice Library"]
+        Repo["Question Repository (MongoDB / Memory)"]
+    end
+
+    subgraph ExecEngine ["Execution Engine Service"]
+        SubService["SubmissionService Evaluator"]
+        Sandbox["Docker Code Runner / Local Sandbox"]
+        TokenDiff["Output Token & JSON Normalizer"]
+    end
+
+    UI --> Routes
+    Routes --> ZodValidator
+    ZodValidator --> QService
+    ZodValidator --> SubService
+
+    QService --> GeminiGen
+    GeminiGen --> Auditor
+    Auditor -->|Critique & Retry| GeminiGen
+    Auditor -->|Approved| Sandbox
+    Sandbox -->|Compute Real Outputs| QService
+    QService --> Repo
+
+    SubService --> Sandbox
+    Sandbox --> TokenDiff
+    TokenDiff --> SubService
+    SubService --> Repo
 ```
 
-## Frontend Responsibilities
+---
 
-- Render the coding workspace.
-- Maintain editor and workspace state.
-- Call the backend through `apps/web/src/services/apiClient.ts`.
-- Keep UI components free from direct API formatting and transport details.
-
-UI code should use shared TypeScript contracts in `packages/shared/src/types.ts` rather than defining independent response shapes.
-
-## Backend Responsibilities
-
-- Validate request input.
-- Enforce API contracts.
-- Implement question-generation and submission orchestration.
-- Redact hidden test-case output.
-- Isolate external AI and code-execution providers behind services.
-
-Routes should remain thin. Domain behavior belongs in service classes, while persistent storage belongs in repository classes.
-
-## Integration Boundaries
-
-### AI Provider
-
-Replace question generation inside `QuestionService` and its repository with an adapter for the selected AI provider. Preserve the structured output contract from `packages/shared/src/types.ts`.
-
-### Code Execution
-
-Submission evaluation currently uses a development placeholder. Production execution must be delegated to a separate isolated worker service. Never execute user code directly in the Express process.
-
-### Database
-
-The current in-memory repository is suitable for local development and demonstrations only. Replacing it with PostgreSQL requires implementing the same repository methods, leaving route and service contracts unchanged.
-
-## Request Flow
+## 6-Stage AI Generation & Verification Pipeline
 
 ```text
-Browser
-  -> apps/web/src/services/apiClient.ts
-  -> Express route
-  -> request validation
-  -> service
-  -> repository or provider adapter
-  -> JSON response
-  -> frontend state
+1. User Selects Category & Difficulty (Arrays, DP, Graphs | Easy, Medium, Hard)
+                      ↓
+2. Gemini Generates Problem Specification (Statement, Raw Stdin Tests, Python Reference Code)
+                      ↓
+3. Independent Question Auditor (Gemini Senior CP Judge: cycles, inequalities, math invariants)
+                      ↓ (Critique looped back if rejected)
+4. Backend Executes Python Reference Code in Sandbox
+                      ↓
+5. Validate & Compute Authentic Expected Outputs (0% hallucinated test answers)
+                      ↓
+6. Save Verified Question to Database (Hidden outputs redacted from public responses)
 ```
 
-## Security Requirements
+---
 
-- Keep provider credentials outside source control.
-- Apply authentication at route or application level before production deployment.
-- Disable direct user-code execution in the application process.
-- Configure strict network, memory, CPU, filesystem, and process limits for workers.
-- Hide `expectedOutput` for test cases marked as hidden.
+## Component Boundaries
+
+### 1. Frontend (`apps/web`)
+- Monaco Editor encapsulated in `.code-area-inner` with `position: absolute; inset: 0;` to guarantee flex containment and prevent layout overflow.
+- Dual Run and Submit buttons (top editor toolbar and bottom pinned footer).
+- Quick keyboard shortcut listeners (`Ctrl + Enter` to run, `Esc` to close modals).
+- Real-time client timer synchronizing with server-side attempt expiry.
+
+### 2. API Server (`apps/api`)
+- Thin controllers backed by domain services.
+- `pino-http` logging and `helmet` security middleware.
+- Structured error handling with standardized HTTP error classes (`HttpError`).
+
+### 3. Question Engine (`services/question-engine`)
+- `geminiProvider.ts`: Model fallback across `gemini-3.5-flash-lite`, `gemini-flash-lite-latest`, `gemini-3.5-flash`, `gemini-3.8-flash`.
+- `questionAuditor.ts`: Independent competitive programming verification prompt.
+- `curatedQuestions.ts`: Production offline library across Stacks, DP, and Arrays.
+- `questionRepository.ts`: Dual MongoDB and in-memory persistence with hidden output redaction.
+
+### 4. Execution Engine (`services/execution-engine`)
+- `submissionService.ts`: Universal raw stdin tokenization and multi-language evaluation.
+- `dockerCodeRunner.ts`: Sandboxed container execution with CPU, memory, and timeout controls.
+- Output comparison modes: `token` (whitespace-neutral), `exact` (preserves line structure), and `json` (deep value equivalence).
+
+### 5. Shared Contracts (`packages/shared`)
+- Unified TypeScript interfaces (`QuestionDto`, `SubmissionResultDto`, `AttemptDto`, `ProgrammingLanguage`).
+- Shared input validation schemas across frontend and backend.
