@@ -2,6 +2,7 @@ import type { AttemptDto, Difficulty, OutputComparisonMode, PracticeTimerDto, Pr
 import { MongoClient, type Db } from 'mongodb'
 import type { SubmissionResultDto } from '../../../packages/shared/src/types.js'
 import { randomUUID } from 'node:crypto'
+import { curatedQuestions } from './curatedQuestions.js'
 
 export class QuestionRepository {
   private readonly questions = new Map<string, QuestionDto>()
@@ -14,6 +15,9 @@ export class QuestionRepository {
   constructor(mongoUri?: string, databaseName = 'testmeman') {
     this.databaseName = databaseName
     this.client = mongoUri ? new MongoClient(mongoUri) : undefined
+    for (const q of curatedQuestions) {
+      this.questions.set(q.id, q)
+    }
   }
 
   async findAttemptedQuestionIds(ownerId: string): Promise<string[]> {
