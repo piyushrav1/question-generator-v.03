@@ -16,7 +16,8 @@
     "server": "tsx watch apps/api/server/src/index.ts",
     "server:start": "tsx apps/api/server/src/index.ts",
     "dev:all": "concurrently -k \"npm run server\" \"npm run dev\"",
-    "check": "npm run typecheck && npm run build"
+    "test": "tsx --test services/question-engine/tests/*.test.ts services/execution-engine/tests/*.test.ts",
+    "check": "npm run typecheck && npm run test && npm run build"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
