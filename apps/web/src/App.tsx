@@ -3,7 +3,7 @@ import {
   Bell, ChevronDown, ChevronUp, Code2, Copy, Play, RefreshCw,
   Sparkles, Send, Settings, Terminal, CheckCircle2, Sun, Moon, Monitor, RotateCcw, Maximize2,
   ArrowRight, Layers3, Clock3, Trophy, Shuffle,
-  Pause, LogOut, X,
+  Pause, LogOut, X, Check, Command,
 } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import { apiClient } from './services'
@@ -98,6 +98,8 @@ function App() {
     (localStorage.getItem('testmeman.preferredDifficulty') as 'easy' | 'medium' | 'hard') || 'medium',
   )
   const [customPromptText, setCustomPromptText] = useState<string>('')
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [copiedInput, setCopiedInput] = useState(false)
   const [resumeAttempt, setResumeAttempt] = useState<AttemptDto | null>(null)
   const [language, setLanguage] = useState<ProgrammingLanguage>('Python')
   const [code, setCode] = useState(defaultStarterCode.Python)
@@ -463,6 +465,13 @@ function App() {
       })
   }
 
+  const copyInputToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedInput(true)
+      setTimeout(() => setCopiedInput(false), 2000)
+    })
+  }
+
   useEffect(() => {
     const handleCtrlEnter = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
@@ -754,6 +763,15 @@ function App() {
           >
             <LogOut size={15} />
             Quit Test
+          </button>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts"
+            onClick={() => setShortcutsOpen(true)}
+          >
+            <Command size={18} />
           </button>
           <button className="icon-button" aria-label="Notifications"><Bell size={18} /></button>
           <button className="avatar-button"><span>PR</span></button>
@@ -1104,8 +1122,9 @@ function App() {
                       <code>{visibleTests[selectedTest]?.input ?? ''}</code>
                       <button
                         aria-label="Copy input"
-                        onClick={() => navigator.clipboard.writeText(visibleTests[selectedTest]?.input ?? '')}
-                      ><Copy size={14} /></button>
+                        title={copiedInput ? 'Copied!' : 'Copy input'}
+                        onClick={() => copyInputToClipboard(visibleTests[selectedTest]?.input ?? '')}
+                      >{copiedInput ? <Check size={14} className="copy-success" /> : <Copy size={14} />}</button>
                     </div>
                     <label>Expected output</label>
                     <div className="expected-value">{visibleTests[selectedTest]?.expectedOutput ?? ''}</div>
@@ -1204,6 +1223,43 @@ function App() {
         </section>
 
       </main>
+      {shortcutsOpen && (
+        <div className="quit-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setShortcutsOpen(false)
+        }}>
+          <div className="shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcuts-dialog-title">
+            <div className="shortcuts-header">
+              <h2 id="shortcuts-dialog-title">Keyboard Shortcuts</h2>
+              <button
+                className="quit-dialog-close"
+                type="button"
+                aria-label="Close shortcuts dialog"
+                onClick={() => setShortcutsOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="shortcuts-list">
+              <div className="shortcut-row">
+                <span>Run visible test cases</span>
+                <kbd className="shortcut-key">Ctrl + Enter</kbd>
+              </div>
+              <div className="shortcut-row">
+                <span>Run visible test cases (macOS)</span>
+                <kbd className="shortcut-key">Cmd + Enter</kbd>
+              </div>
+              <div className="shortcut-row">
+                <span>Close modal / dialog</span>
+                <kbd className="shortcut-key">Esc</kbd>
+              </div>
+              <div className="shortcut-row">
+                <span>Reset pane dimensions</span>
+                <kbd className="shortcut-key">Double click resizers</kbd>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       {quitDialogOpen && (
         <div className="quit-dialog-backdrop" role="presentation" onMouseDown={(event) => {
           if (event.target === event.currentTarget && !quitting) setQuitDialogOpen(false)
