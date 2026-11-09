@@ -106,3 +106,20 @@ export interface HintDto {
   content: string
   totalLevels: number
 }
+
+export interface QuestionSearchQueryDto {
+  topic?: string
+  difficulty?: Difficulty
+  query?: string
+  page?: number
+  limit?: number
+}
+
+export interface QuestionSearchResultDto {
+  items: QuestionDto[]
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+

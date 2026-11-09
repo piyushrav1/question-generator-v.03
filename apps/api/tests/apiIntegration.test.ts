@@ -103,6 +103,18 @@ test('API Integration: POST /api/submissions evaluates code against curated ques
   assert.ok(typeof result.totalCases === 'number')
 })
 
+test('API Integration: GET /api/questions returns paginated search results', async () => {
+  const res = await fetch(`${baseUrl}/api/questions?topic=arrays&limit=5`, { headers: { connection: 'close' } })
+  assert.equal(res.status, 200)
+
+  const data = await res.json() as any
+  assert.ok(Array.isArray(data.items))
+  assert.ok(data.total >= 1)
+  assert.equal(data.page, 1)
+  assert.equal(data.limit, 5)
+  assert.ok(data.items.every((q: any) => q.topic.toLowerCase() === 'arrays'))
+})
+
 test('API Integration: returns 404 for non-existent routes', async () => {
   const res = await fetch(`${baseUrl}/api/non-existent-route-xyz`, { headers: { connection: 'close' } })
   assert.equal(res.status, 404)

@@ -1,4 +1,4 @@
-import type { AttemptDto, Difficulty, OutputComparisonMode, PracticeTimerDto, ProgrammingLanguage, QuestionDto, TestCaseDto } from '../../../packages/shared/src/types.js'
+import type { AttemptDto, Difficulty, OutputComparisonMode, PracticeTimerDto, ProgrammingLanguage, QuestionDto, QuestionSearchQueryDto, QuestionSearchResultDto, TestCaseDto } from '../../../packages/shared/src/types.js'
 import { MongoClient, type Db } from 'mongodb'
 import type { SubmissionResultDto } from '../../../packages/shared/src/types.js'
 import { randomUUID } from 'node:crypto'
@@ -97,6 +97,76 @@ export class QuestionRepository {
     return {
       ...stored,
       testCases: stored.testCases.filter((testCase) => typeof testCase.input === 'string' && testCase.input.trim().length > 0),
+    }
+  }
+
+  async search(filter: QuestionSearchQueryDto = {}): Promise<QuestionSearchResultDto> {
+    const page = Math.max(1, filter.page ?? 1)
+    const limit = Math.max(1, Math.min(50, filter.limit ?? 10))
+    const skip = (page - 1) * limit
+
+    const db = await this.getDatabase()
+    if (db) {
+      const query: Record<string, any> = {}
+      if (filter.topic) {
+        query.topic = { $regex: new RegExp(`^${filter.topic}$`, 'i') }
+      }
+      if (filter.difficulty) {
+        query.difficulty = filter.difficulty
+      }
+      if (filter.query) {
+        const escaped = filter.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        query.$or = [
+          { title: { $regex: escaped, $options: 'i' } },
+          { statement: { $regex: escaped, $options: 'i' } },
+        ]
+      }
+      const total = await db.collection<QuestionDto>('questions').countDocuments(query)
+      const items = await db.collection<QuestionDto>('questions')
+        .find(query)
+        .skip(skip)
+        .limit(limit)
+        .toArray()
+
+      return {
+        items: items.map((stored) => ({
+          ...stored,
+          testCases: stored.testCases.filter((testCase) => typeof testCase.input === 'string' && testCase.input.trim().length > 0),
+        })),
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+      }
+    }
+
+    let matches = Array.from(this.questions.values())
+    if (filter.topic) {
+      const topicLower = filter.topic.toLowerCase()
+      matches = matches.filter((q) => q.topic.toLowerCase() === topicLower)
+    }
+    if (filter.difficulty) {
+      matches = matches.filter((q) => q.difficulty === filter.difficulty)
+    }
+    if (filter.query) {
+      const qLower = filter.query.toLowerCase()
+      matches = matches.filter((q) =>
+        q.title.toLowerCase().includes(qLower) || q.statement.toLowerCase().includes(qLower),
+      )
+    }
+
+    const total = matches.length
+    const paged = matches.slice(skip, skip + limit).map((inMemory) => ({
+      ...inMemory,
+      testCases: inMemory.testCases.filter((testCase) => typeof testCase.input === 'string' && testCase.input.trim().length > 0),
+    }))
+
+    return {
+      items: paged,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
     }
   }
 

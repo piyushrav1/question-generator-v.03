@@ -1,4 +1,4 @@
-import type { Difficulty, HintDto, QuestionDto } from '../../../packages/shared/src/types.js'
+import type { Difficulty, HintDto, QuestionDto, QuestionSearchQueryDto, QuestionSearchResultDto } from '../../../packages/shared/src/types.js'
 import { QuestionRepository } from './questionRepository.js'
 import { HttpError } from '../../../packages/shared/src/errors/httpError.js'
 import type { GeneratedQuestion, QuestionProvider } from './provider.js'
@@ -135,6 +135,21 @@ export class QuestionService {
 
     if (lastError instanceof HttpError) throw lastError
     throw new HttpError(500, lastError?.message || 'Failed to generate a verified question.', 'QUESTION_GENERATION_FAILED')
+  }
+
+  async search(filter: QuestionSearchQueryDto = {}): Promise<QuestionSearchResultDto> {
+    const result = await this.repository.search(filter)
+    return {
+      ...result,
+      items: result.items.map((question) => ({
+        ...question,
+        testCases: question.testCases.map((testCase) =>
+          testCase.hidden
+            ? { id: testCase.id, name: testCase.name, input: '', hidden: true }
+            : testCase,
+        ),
+      })),
+    }
   }
 
   async getById(id: string): Promise<QuestionDto> {

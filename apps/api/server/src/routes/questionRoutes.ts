@@ -9,8 +9,26 @@ const generateSchema = z.object({
   difficulty: z.enum(DIFFICULTIES).default('medium'),
 })
 
+const searchQuerySchema = z.object({
+  topic: z.string().trim().optional(),
+  difficulty: z.enum(DIFFICULTIES).optional(),
+  query: z.string().trim().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+})
+
 export function createQuestionRouter(service: QuestionService): Router {
   const router = Router()
+
+  router.get('/', async (request, response, next) => {
+    try {
+      const filter = searchQuerySchema.parse(request.query)
+      const result = await service.search(filter)
+      response.json(result)
+    } catch (error) {
+      next(error)
+    }
+  })
 
   router.post('/generate', validateBody(generateSchema), async (request, response, next) => {
     try {
