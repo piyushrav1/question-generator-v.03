@@ -18,9 +18,15 @@ import { QuestionAuditor } from '../../../../services/question-engine/src/questi
 import { DockerCodeRunner } from '../../../../services/execution-engine/src/dockerCodeRunner.js'
 import { createAttemptRouter } from './routes/attemptRoutes.js'
 
-export function createApp() {
+export interface AppDependencies {
+  repository?: QuestionRepository
+  questionService?: QuestionService
+  submissionService?: SubmissionService
+}
+
+export function createApp(dependencies: AppDependencies = {}) {
   const app = express()
-  const repository = new QuestionRepository(env.MONGODB_URI, env.MONGODB_DB)
+  const repository = dependencies.repository ?? new QuestionRepository(env.MONGODB_URI, env.MONGODB_DB)
   const codeRunner = new DockerCodeRunner()
   const questionProvider = env.GEMINI_API_KEY
     ? new GeminiQuestionProvider(env.GEMINI_API_KEY, env.GEMINI_MODEL)
@@ -28,8 +34,8 @@ export function createApp() {
   const questionAuditor = env.GEMINI_API_KEY
     ? new QuestionAuditor(env.GEMINI_API_KEY, env.GEMINI_MODEL)
     : undefined
-  const questionService = new QuestionService(repository, questionProvider, questionAuditor, codeRunner)
-  const submissionService = new SubmissionService(repository, codeRunner, env.EXECUTION_TIMEOUT_MS)
+  const questionService = dependencies.questionService ?? new QuestionService(repository, questionProvider, questionAuditor, codeRunner)
+  const submissionService = dependencies.submissionService ?? new SubmissionService(repository, codeRunner, env.EXECUTION_TIMEOUT_MS)
 
   const configuredOrigins = env.CLIENT_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
   const allowedOrigins = new Set([
