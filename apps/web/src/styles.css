@@ -289,7 +289,7 @@ button { cursor: pointer; }
 .running-state { height: 100px; display: flex; align-items: center; justify-content: center; gap: 9px; color: #72808a; font-size: 13px; }
 
 .case-results { margin-top: 9px; border-top: 1px solid #edf0f2; }
-.case-result-row { min-height: 38px; border-bottom: 1px solid #edf0f2; display: grid; grid-template-columns: minmax(140px, 1fr) 1fr 70px; align-items: center; gap: 8px; font-size: 11px; }
+.case-result-row { min-height: 38px; border-bottom: 1px solid #edf0f2; display: grid; grid-template-columns: minmax(130px, 1fr) 1fr auto; align-items: center; gap: 8px; font-size: 11px; padding: 0 10px; }
 .case-result-row code { color: #46545f; font-family: "JetBrains Mono", monospace; }
 .case-status { display: flex; align-items: center; gap: 6px; font-weight: 600; text-transform: capitalize; }
 .case-status.passed { color: var(--success); }
@@ -297,9 +297,104 @@ button { cursor: pointer; }
 .case-result { border-bottom: 1px solid var(--border-subtle); }
 .case-result-row { width: 100%; min-height: 38px; border: 0; background: transparent; color: var(--text-secondary); text-align: left; }
 .case-result-row:hover { background: var(--surface-muted); }
+.case-runtime-wrap { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.case-runtime-num { color: var(--text-muted); font-size: 11px; }
+.runtime-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.runtime-badge.runtime-fast {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+.runtime-badge.runtime-normal {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+.runtime-badge.runtime-slow {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
 .case-result-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px 10px 10px; background: var(--surface-muted); }
 .case-result-details div { min-height: 34px; border: 1px solid var(--border-subtle); border-radius: 6px; padding: 7px; display: flex; flex-direction: column; gap: 4px; }
 .case-result-details span { color: var(--text-muted); font-size: 9px; text-transform: uppercase; }
+.diff-viewer-card {
+  grid-column: 1 / -1;
+  display: flex !important;
+  flex-direction: column;
+  gap: 8px !important;
+  border: 1px solid var(--border-subtle) !important;
+  border-radius: 6px;
+  padding: 10px !important;
+  background: var(--surface);
+}
+.diff-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+.diff-title {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.diff-mismatch-badge {
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.diff-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.diff-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+}
+.diff-col-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.diff-col pre {
+  margin: 0;
+  padding: 8px;
+  border-radius: 5px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.diff-col.diff-expected pre {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: var(--text-primary);
+}
+.diff-col.diff-actual pre {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: var(--text-primary);
+}
 .custom-layout { height: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 12px; }
 .custom-layout label { display: block; margin-bottom: 6px; color: #687580; font-size: 11px; font-weight: 700; }
 .custom-layout textarea { width: 100%; height: 100px; resize: none; border: 1px solid #e1e7ea; border-radius: 7px; padding: 9px; font-family: "JetBrains Mono", monospace; font-size: 11px; }

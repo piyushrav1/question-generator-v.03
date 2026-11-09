@@ -1197,13 +1197,41 @@ function App() {
                                   {test.status === 'passed' ? <CheckCircle2 size={14} /> : <Terminal size={14} />}
                                   {test.hidden ? `Hidden Test ${index + 1}` : `Test Case ${index + 1}`}
                                 </span>
-                                <span>{test.status.replace(/_/g, ' ')}</span>
-                                <span>{test.runtimeMs} ms</span>
+                                <span className="case-status-label">{test.status.replace(/_/g, ' ')}</span>
+                                <span className="case-runtime-wrap">
+                                  <span className={`runtime-badge ${test.runtimeMs < 50 ? 'runtime-fast' : test.runtimeMs <= 200 ? 'runtime-normal' : 'runtime-slow'}`}>
+                                    {test.runtimeMs < 50 ? 'Fast' : test.runtimeMs <= 200 ? 'Good' : 'Slow'}
+                                  </span>
+                                  <span className="case-runtime-num">{test.runtimeMs} ms</span>
+                                </span>
                               </button>
                               {expandedCase === `${test.id}-${index}` && (
                                 <div className="case-result-details">
-                                  {test.expectedOutput !== undefined && <div><span>Expected</span><code>{test.expectedOutput}</code></div>}
-                                  {test.actualOutput !== undefined && <div><span>Actual</span><code>{test.actualOutput || '(empty output)'}</code></div>}
+                                  {test.status !== 'passed' && test.expectedOutput !== undefined && test.actualOutput !== undefined ? (
+                                    <div className="diff-viewer-card">
+                                      <div className="diff-header">
+                                        <span className="diff-title">Output Diff Analysis</span>
+                                        {test.mismatchLine !== undefined && (
+                                          <span className="diff-mismatch-badge">Mismatch at line {test.mismatchLine}, col {test.mismatchColumn ?? 1}</span>
+                                        )}
+                                      </div>
+                                      <div className="diff-grid">
+                                        <div className="diff-col diff-expected">
+                                          <span className="diff-col-title">Expected</span>
+                                          <pre>{test.expectedOutput}</pre>
+                                        </div>
+                                        <div className="diff-col diff-actual">
+                                          <span className="diff-col-title">Actual</span>
+                                          <pre>{test.actualOutput || '(no output)'}</pre>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      {test.expectedOutput !== undefined && <div><span>Expected</span><code>{test.expectedOutput}</code></div>}
+                                      {test.actualOutput !== undefined && <div><span>Actual</span><code>{test.actualOutput || '(empty output)'}</code></div>}
+                                    </>
+                                  )}
                                 </div>
                               )}
                             </div>
