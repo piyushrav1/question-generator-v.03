@@ -23,10 +23,18 @@ TestMeMan is an AI-powered competitive programming and technical interview pract
   - Dual quick-action **Run** and **Submit** controls in the editor toolbar.
   - Keyboard shortcut: `Ctrl + Enter` (or `Cmd + Enter`) to run visible tests immediately.
   - Always-visible test case browser, custom input runner, and detailed per-test execution metrics (runtime ms, actual vs. expected output).
+  - **Visual Runtime Badges & Diff Viewer**: Automatic categorization of execution performance (`Fast` < 50ms, `Good` 50-200ms, `Slow` > 200ms) and side-by-side output diff inspection for mismatched test cases.
+  - **Code Reset with Safety Modal**: Ability to reset current editor code to problem starter template with accidental discard protection.
   - Interactive practice timer with pause, resume, extend (+5m), and reset controls.
-- **Dual Persistence Architecture**:
-  - Production-ready MongoDB repository.
-  - In-memory development repository with preloaded curated questions for seamless local testing.
+- **Enterprise Platform Robustness**:
+  - **Progressive 3-Tier Hint Engine**: Tier 1 (Intuition), Tier 2 (Strategy), and Tier 3 (Edge Cases) tailored per topic.
+  - **Theoretical Complexity Analyzer**: Big-O constraint validator analyzing $N$ boundaries against $10^8$ operations per second budget.
+  - **Sliding-Window Rate Limiter**: Configurable IP-based rate limiting on compute & generation endpoints with RFC `X-RateLimit-*` headers.
+  - **Infinite Loop Safeguards**: Execution engine with 100KB buffer bounds and hard wall-clock execution timeouts.
+- **Dual Persistence & Paginated Search**:
+  - Production-ready MongoDB repository and in-memory development repository.
+  - Paginated search API (`GET /api/questions`) with topic filtering, difficulty filtering, and text querying.
+  - Shared domain models and type guards (`packages/shared`).
 
 ---
 

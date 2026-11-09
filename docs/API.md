@@ -2,6 +2,16 @@
 
 Base URL for local development: `http://127.0.0.1:4000`
 
+### Rate Limiting Headers
+
+All mutation and compute endpoints (problem generation and code submissions) enforce sliding window rate limits and return standard RFC headers:
+
+- `X-RateLimit-Limit`: Maximum allowed requests in the sliding 60-second window (Generation: 20, Submissions: 40).
+- `X-RateLimit-Remaining`: Remaining request quota in the active window.
+- `X-RateLimit-Reset`: Seconds remaining until window reset.
+
+When rate limits are exceeded, the API responds with `429 Too Many Requests`.
+
 ---
 
 ## 1. System Health & Diagnostics
@@ -92,10 +102,76 @@ Returns a verified `QuestionDto`. Hidden test cases have `expectedOutput` redact
 }
 ```
 
+### Search & List Questions
+
+```http
+GET /api/questions?topic=arrays&difficulty=medium&query=sum&page=1&limit=10
+```
+
+#### Query Parameters
+
+- `topic` *(string, optional)*: Filter by category (e.g. `arrays`, `stacks`, `trees`, `dynamic-programming`)
+- `difficulty` *(string, optional)*: Filter by `easy`, `medium`, or `hard`
+- `query` *(string, optional)*: Substring search across question title and statement
+- `page` *(integer, optional, default: 1)*: 1-based page number
+- `limit` *(integer, optional, default: 10, max: 50)*: Page size
+
+#### Success Response (200 OK)
+
+```json
+{
+  "items": [
+    {
+      "id": "curated-arrays-two-sum",
+      "title": "Two Sum Target Pair",
+      "difficulty": "easy",
+      "topic": "arrays",
+      "statement": "Given an array of integers nums and an integer target...",
+      "constraints": ["2 <= N <= 10^4", "-10^9 <= nums[i] <= 10^9"],
+      "examples": [{ "input": "4 9\n2 7 11 15", "output": "0 1" }],
+      "starterCode": { ... },
+      "testCases": [ ... ]
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 10,
+  "totalPages": 1
+}
+```
+
 ### Get Question by ID
 
 ```http
 GET /api/questions/:id
+```
+
+### Request Progressive Algorithmic Hints
+
+```http
+POST /api/questions/:id/hints
+Content-Type: application/json
+```
+
+#### Request Body
+
+```json
+{
+  "level": 1
+}
+```
+
+- `level`: `1` (Tier 1: High-Level Intuition), `2` (Tier 2: Algorithmic Strategy), or `3` (Tier 3: Critical Edge Cases & Invariants). Clamped between 1 and 3.
+
+#### Success Response (200 OK)
+
+```json
+{
+  "level": 1,
+  "title": "Tier 1: High-Level Intuition",
+  "content": "Consider whether sorting, two pointers (from both ends or sliding window), or prefix sums can reduce an O(N^2) search to O(N).",
+  "totalLevels": 3
+}
 ```
 
 ---
