@@ -127,6 +127,7 @@ function App() {
   const [expandedCase, setExpandedCase] = useState<string | null>(null)
   const revisionRef = useRef(1)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [resetModalOpen, setResetModalOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system')
   const [fontSize, setFontSize] = useState(13)
   const [wordWrap, setWordWrap] = useState(false)
@@ -290,6 +291,15 @@ function App() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [quitDialogOpen, quitting])
+
+  useEffect(() => {
+    if (!resetModalOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setResetModalOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [resetModalOpen])
 
   useEffect(() => {
     localStorage.setItem('testmeman.layout.problemWidth', String(problemWidth))
@@ -890,6 +900,15 @@ function App() {
                   <option>C++</option>
                 </select>
               </button>
+              <button
+                className="icon-button"
+                aria-label="Reset code to starter template"
+                title="Reset code to starter template"
+                type="button"
+                onClick={() => setResetModalOpen(true)}
+              >
+                <RotateCcw size={16} />
+              </button>
               <div className="settings-wrap">
                 <button
                   className="icon-button"
@@ -1286,6 +1305,44 @@ function App() {
               <button type="button" className="quit-confirm-button" onClick={quitTest} disabled={quitting}>
                 {quitting ? <RefreshCw size={15} className="spin" /> : <LogOut size={15} />}
                 {quitting ? 'Quitting...' : 'Quit Test'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {resetModalOpen && (
+        <div className="quit-dialog-backdrop" role="presentation" onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setResetModalOpen(false)
+        }}>
+          <div className="quit-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-dialog-title" aria-describedby="reset-dialog-description">
+            <button
+              className="quit-dialog-close"
+              type="button"
+              aria-label="Close reset confirmation"
+              onClick={() => setResetModalOpen(false)}
+            >
+              <X size={18} />
+            </button>
+            <div className="quit-dialog-icon"><RotateCcw size={20} /></div>
+            <h2 id="reset-dialog-title">Reset Code Template</h2>
+            <p id="reset-dialog-description">
+              Are you sure you want to restore the default starter code for <strong>{language}</strong>? Any unsaved edits in your editor will be discarded.
+            </p>
+            <div className="quit-dialog-actions">
+              <button type="button" className="quit-cancel-button" onClick={() => setResetModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="quit-confirm-button"
+                onClick={() => {
+                  const starter = question?.starterCode?.[language] || defaultStarterCode[language]
+                  setCode(starter)
+                  setResetModalOpen(false)
+                }}
+              >
+                <RotateCcw size={15} />
+                Reset Code
               </button>
             </div>
           </div>
