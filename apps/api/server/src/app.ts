@@ -9,6 +9,7 @@ import { notFoundHandler } from './middleware/notFoundHandler.js'
 import { QuestionRepository } from '../../../../services/question-engine/src/questionRepository.js'
 import { createQuestionRouter } from './routes/questionRoutes.js'
 import { healthRouter } from './routes/healthRoutes.js'
+import { createRateLimiter } from './middleware/rateLimiter.js'
 import { createSubmissionRouter } from './routes/submissionRoutes.js'
 import { QuestionService } from '../../../../services/question-engine/src/questionService.js'
 import { SubmissionService } from '../../../../services/execution-engine/src/submissionService.js'
@@ -60,9 +61,20 @@ export function createApp() {
   app.use(express.json({ limit: '1mb' }))
   app.use(pinoHttp({ logger }))
 
+  const generationLimiter = createRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 20,
+    message: 'Question generation rate limit reached. Please wait before generating more questions.',
+  })
+  const submissionLimiter = createRateLimiter({
+    windowMs: 60_000,
+    maxRequests: 40,
+    message: 'Submission rate limit reached. Please wait before submitting again.',
+  })
+
   app.use('/api/health', healthRouter)
-  app.use('/api/questions', createQuestionRouter(questionService))
-  app.use('/api/submissions', createSubmissionRouter(submissionService, repository))
+  app.use('/api/questions', generationLimiter, createQuestionRouter(questionService))
+  app.use('/api/submissions', submissionLimiter, createSubmissionRouter(submissionService, repository))
   app.use('/api/attempts', createAttemptRouter(repository, questionService))
 
   app.use(notFoundHandler)
