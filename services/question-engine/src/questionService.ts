@@ -1,4 +1,4 @@
-import type { Difficulty, QuestionDto } from '../../../packages/shared/src/types.js'
+import type { Difficulty, HintDto, QuestionDto } from '../../../packages/shared/src/types.js'
 import { QuestionRepository } from './questionRepository.js'
 import { HttpError } from '../../../packages/shared/src/errors/httpError.js'
 import type { GeneratedQuestion, QuestionProvider } from './provider.js'
@@ -152,14 +152,62 @@ export class QuestionService {
     }
   }
 
-  async getHint(id: string): Promise<{ hint: string; level: number }> {
+  async getHint(id: string, requestedLevel: number = 1): Promise<HintDto> {
     const question = await this.repository.findById(id)
     if (!question) {
       throw new HttpError(404, 'Question not found.', 'QUESTION_NOT_FOUND')
     }
+    const safeLevel = (Math.max(1, Math.min(3, Math.floor(requestedLevel))) as 1 | 2 | 3)
+    return this.buildProgressiveHint(question, safeLevel)
+  }
+
+  private buildProgressiveHint(question: QuestionDto, level: 1 | 2 | 3): HintDto {
+    const topic = question.topic.toLowerCase()
+
+    if (level === 1) {
+      const intuitionMap: Record<string, string> = {
+        stacks: 'Think about whether you need the nearest or next element that satisfies a condition. A stack helps track unresolved elements in LIFO order.',
+        'dynamic-programming': 'Look for overlapping subproblems and optimal substructure. What state uniquely represents the subproblem at step i?',
+        arrays: 'Consider whether sorting, two pointers (from both ends or sliding window), or prefix sums can reduce an O(N^2) search to O(N).',
+        trees: 'Can this be solved by post-order or pre-order recursion? Often computing information from left and right subtrees gives the answer for the parent node.',
+        graphs: 'Is this finding shortest paths (BFS for unweighted, Dijkstra for weighted) or exploring connected components (DFS)?',
+      }
+      return {
+        level: 1,
+        title: 'Tier 1: High-Level Intuition',
+        content: intuitionMap[topic] ?? `Analyze the constraints for ${question.title}. Break down what invariant needs to be preserved as you process the input.`,
+        totalLevels: 3,
+      }
+    }
+
+    if (level === 2) {
+      const approachMap: Record<string, string> = {
+        stacks: 'Maintain a monotonic stack storing values or indices. While the stack is non-empty and the current element satisfies the comparison condition, pop from the stack and compute the result.',
+        'dynamic-programming': 'Define dp[i] as the answer for subproblem size i. Write down the transition: how do you transition from dp[i - 1] or smaller subproblems to dp[i]?',
+        arrays: 'If looking for target pairs or differences, a hash set or two-pointer scan on sorted data gives O(N) or O(N log N) time.',
+        trees: 'If finding lowest common ancestor or paths, check if the current node matches either target. If both left and right recursive calls return non-null, the current node is the answer.',
+        graphs: 'Build an adjacency list first. Keep a visited array or set to prevent infinite loops in cycles.',
+      }
+      return {
+        level: 2,
+        title: 'Tier 2: Algorithmic Strategy',
+        content: approachMap[topic] ?? `Consider an optimal data structure for ${question.topic}. Formulate the invariant: what does each iteration or recursive call maintain?`,
+        totalLevels: 3,
+      }
+    }
+
+    const edgeCaseMap: Record<string, string> = {
+      stacks: 'Watch out for: strictly decreasing inputs where no element is popped, single-element arrays, duplicate values, and items remaining on the stack at the end.',
+      'dynamic-programming': 'Check base cases: amount = 0, impossible target (return -1), and large integer values that could overflow standard 32-bit types.',
+      arrays: 'Watch out for: negative integers, empty or 1-element arrays, multiple duplicate pairs, and 0-based vs 1-based index requirements.',
+      trees: 'Check edge cases: root is null, root itself is one of the target nodes, or single-node trees.',
+      graphs: 'Check edge cases: disconnected graphs, self-loops, and multi-component graphs where the destination is unreachable.',
+    }
     return {
-      hint: `Carefully examine the input format and constraints for ${question.title}. Consider how standard algorithmic patterns for ${question.topic} apply to this structure.`,
-      level: 1,
+      level: 3,
+      title: 'Tier 3: Critical Edge Cases & Invariants',
+      content: edgeCaseMap[topic] ?? `Inspect the problem constraints carefully: ${question.constraints.slice(0, 2).join(', ')}. Ensure your base cases handle minimal inputs properly.`,
+      totalLevels: 3,
     }
   }
 }

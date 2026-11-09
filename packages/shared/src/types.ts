@@ -99,3 +99,10 @@ export interface AttemptDto {
   updatedAt: string
   timer?: PracticeTimerDto
 }
+
+export interface HintDto {
+  level: 1 | 2 | 3
+  title: string
+  content: string
+  totalLevels: number
+}

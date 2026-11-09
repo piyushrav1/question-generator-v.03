@@ -32,8 +32,9 @@ export function createQuestionRouter(service: QuestionService): Router {
 
   router.post('/:id/hints', async (request, response, next) => {
     const id = Array.isArray(request.params.id) ? request.params.id[0] : request.params.id
+    const level = typeof request.body?.level === 'number' ? request.body.level : 1
     try {
-      response.json(await service.getHint(id))
+      response.json(await service.getHint(id, level))
     } catch (error) {
       next(error)
     }
