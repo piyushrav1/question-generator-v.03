@@ -5,6 +5,26 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { CodeRunner, ExecutionRequest, ExecutionResult } from './codeRunner.js'
 
+export const MAX_OUTPUT_BYTES = 100 * 1024 // 100 KB safety cap
+
+export function appendOutputChunk(
+  current: string,
+  chunk: Buffer | string,
+  maxBytes = MAX_OUTPUT_BYTES,
+): { output: string; truncated: boolean } {
+  if (Buffer.byteLength(current, 'utf8') >= maxBytes) {
+    return { output: current, truncated: true }
+  }
+  const next = current + chunk.toString()
+  if (Buffer.byteLength(next, 'utf8') > maxBytes) {
+    return {
+      output: next.slice(0, maxBytes) + '\n[Output truncated: exceeded 100KB limit]',
+      truncated: true,
+    }
+  }
+  return { output: next, truncated: false }
+}
+
 export class DockerCodeRunner implements CodeRunner {
   async execute(request: ExecutionRequest): Promise<ExecutionResult> {
     const workDir = join(tmpdir(), `testmeman-${Date.now()}-${Math.random().toString(36).slice(2)}`)
@@ -82,8 +102,16 @@ export class DockerCodeRunner implements CodeRunner {
       let timedOut = false
       let settled = false
 
-      child.stdout.on('data', (chunk) => { stdout += chunk.toString() })
-      child.stderr.on('data', (chunk) => { stderr += chunk.toString() })
+      child.stdout.on('data', (chunk) => {
+        const res = appendOutputChunk(stdout, chunk)
+        stdout = res.output
+        if (res.truncated) child.stdout?.destroy()
+      })
+      child.stderr.on('data', (chunk) => {
+        const res = appendOutputChunk(stderr, chunk)
+        stderr = res.output
+        if (res.truncated) child.stderr?.destroy()
+      })
       child.stdin.end(stdin)
 
       const timer = setTimeout(() => {
@@ -322,8 +350,16 @@ export class DockerCodeRunner implements CodeRunner {
       let stderr = ''
       let timedOut = false
       let settled = false
-      child.stdout?.on('data', (chunk) => { stdout += chunk.toString() })
-      child.stderr?.on('data', (chunk) => { stderr += chunk.toString() })
+      child.stdout?.on('data', (chunk) => {
+        const res = appendOutputChunk(stdout, chunk)
+        stdout = res.output
+        if (res.truncated) child.stdout?.destroy()
+      })
+      child.stderr?.on('data', (chunk) => {
+        const res = appendOutputChunk(stderr, chunk)
+        stderr = res.output
+        if (res.truncated) child.stderr?.destroy()
+      })
       child.stdin?.end(stdin)
 
       const timer = setTimeout(() => {
